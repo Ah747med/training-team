@@ -5554,6 +5554,89 @@ body:not(.light-mode) .page-copyright {
     border-color: var(--primary) !important;
 }
 
+/* Selected Trainer Display (Centered below Trainer Bar) */
+.manager-selected-trainer-display {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin: 0.65rem 0 1.25rem 0;
+    text-align: center;
+    animation: fadeInTrainerName 0.25s ease-out;
+}
+
+@keyframes fadeInTrainerName {
+    from {
+        opacity: 0;
+        transform: translateY(-6px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.selected-trainer-center-card {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 0.75rem 2.25rem;
+    border-radius: 16px;
+    background: #ffffff;
+    border: 1.5px solid rgba(29, 78, 216, 0.18);
+    box-shadow: 0 10px 25px -4px rgba(29, 78, 216, 0.08), 0 2px 6px rgba(0, 0, 0, 0.04);
+    min-width: 280px;
+    max-width: 90%;
+    transition: all 0.2s ease;
+}
+
+.selected-trainer-badge-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.35rem;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.selected-trainer-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.72rem;
+    font-weight: 800;
+    color: var(--primary);
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    background: rgba(29, 78, 216, 0.08);
+    padding: 0.18rem 0.55rem;
+    border-radius: 6px;
+}
+
+.selected-trainer-account-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #475569;
+    background: #f1f5f9;
+    padding: 0.18rem 0.55rem;
+    border-radius: 6px;
+    border: 1px solid #e2e8f0;
+}
+
+.selected-trainer-center-name {
+    margin: 0;
+    font-size: 1.65rem;
+    font-weight: 900;
+    color: #0f172a;
+    letter-spacing: -0.4px;
+    line-height: 1.25;
+    text-align: center;
+}
+
 .btn-status-dropdown .status-day-num {
     color: #ffffff;
     background: rgba(0, 0, 0, 0.22);
@@ -6362,6 +6445,7 @@ body:not(.light-mode) .page-copyright {
     box-shadow: -10px 0 30px rgba(0, 0, 0, 0.05);
     animation: chatSlideIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.1);
     transform-origin: right;
+    color-scheme: light !important;
 }
 
 .chatbot-header-actions {
@@ -6537,6 +6621,7 @@ body:not(.light-mode) .page-copyright {
     gap: 0.8rem;
     background: white;
     border-top: 1px solid rgba(0, 0, 0, 0.05);
+    color-scheme: light !important;
 }
 
 .chatbot-input-area input {
@@ -6545,14 +6630,26 @@ body:not(.light-mode) .page-copyright {
     border-radius: 1.2rem;
     border: 1px solid #e2e8f0;
     background: #f8fafc;
-    font-size: 0.9rem;
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: #0f172a !important;
+    -webkit-text-fill-color: #0f172a !important;
+    color-scheme: light !important;
     outline: none;
     transition: var(--transition);
+}
+
+.chatbot-input-area input::placeholder {
+    color: #94a3b8 !important;
+    -webkit-text-fill-color: #94a3b8 !important;
+    opacity: 1 !important;
 }
 
 .chatbot-input-area input:focus {
     border-color: var(--primary);
     background: white;
+    color: #0f172a !important;
+    -webkit-text-fill-color: #0f172a !important;
     box-shadow: 0 0 0 4px rgba(var(--primary-rgb), 0.1);
 }
 
@@ -7388,6 +7485,278 @@ body:not(.light-mode) .page-copyright {
     font-size: 0.75rem;
 }
 
+.allover-excel-table th.allover-batch-th {
+    padding: 2px 3px;
+    background: #1f3864;
+    vertical-align: middle;
+}
+
+.allover-excel-table .allover-batch-input {
+    width: 100%;
+    min-height: 28px;
+    box-sizing: border-box;
+    border: 1.5px solid #334e7a;
+    border-radius: 4px;
+    background: #ffffff;
+    color: #0055b8;
+    font-family: inherit;
+    font-size: 0.76rem;
+    font-weight: 700;
+    text-align: center;
+    padding: 3px 6px;
+    outline: none;
+    transition: all 0.2s ease;
+    cursor: text;
+}
+
+.allover-excel-table .allover-batch-input:hover {
+    border-color: #60a5fa;
+}
+
+.allover-excel-table .allover-batch-input:focus {
+    background: #ffffff;
+    border-color: #2563eb;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.35);
+    color: #0f172a;
+}
+
+/* Batch Hover Chart Popover & Trigger */
+.allover-excel-table th.allover-batch-th {
+    position: relative;
+    padding: 3px 4px;
+    background: #1f3864;
+    vertical-align: middle;
+}
+
+.allover-batch-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    width: 100%;
+}
+
+.batch-chart-trigger-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 25px;
+    height: 25px;
+    min-width: 25px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.16);
+    color: #93c5fd;
+    border: 1px solid rgba(255, 255, 255, 0.28);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    padding: 0;
+}
+
+.batch-chart-trigger-btn:hover {
+    background: #2563eb;
+    color: #ffffff;
+    border-color: #60a5fa;
+    transform: scale(1.1);
+    box-shadow: 0 4px 10px rgba(37, 99, 235, 0.45);
+}
+
+.batch-chart-popover {
+    position: fixed;
+    z-index: 999999;
+    width: 385px;
+    max-width: 95vw;
+    max-height: 94vh;
+    overflow-y: auto;
+    background: #ffffff;
+    border-radius: 12px;
+    box-shadow: 0 16px 36px -6px rgba(15, 23, 42, 0.28), 0 0 0 1px rgba(15, 23, 42, 0.08);
+    padding: 9px 12px;
+    box-sizing: border-box;
+    font-family: 'Outfit', system-ui, -apple-system, sans-serif;
+    color: #1e293b;
+    pointer-events: auto;
+    transition: opacity 0.18s cubic-bezier(0.16, 1, 0.3, 1), transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.batch-chart-popover.hidden {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(4px) scale(0.98);
+}
+
+.batch-chart-popover:not(.hidden) {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+}
+
+.popover-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+    padding-bottom: 5px;
+    border-bottom: 1px solid #f1f5f9;
+}
+
+.popover-title-group {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+}
+
+.popover-icon {
+    width: 26px;
+    height: 26px;
+    min-width: 26px;
+    border-radius: 6px;
+    background: linear-gradient(135deg, #1d4ed8, #2563eb);
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 6px rgba(37, 99, 235, 0.3);
+}
+
+.popover-title {
+    margin: 0;
+    font-size: 0.84rem;
+    font-weight: 800;
+    color: #0f172a;
+    line-height: 1.15;
+}
+
+.popover-subtitle {
+    font-size: 0.64rem;
+    color: #64748b;
+    font-weight: 600;
+}
+
+.popover-close-btn {
+    width: 22px;
+    height: 22px;
+    border-radius: 5px;
+    border: 1px solid #e2e8f0;
+    background: #f8fafc;
+    color: #64748b;
+    font-size: 1rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    transition: all 0.15s ease;
+}
+
+.popover-close-btn:hover {
+    background: #fee2e2;
+    color: #ef4444;
+    border-color: #fca5a5;
+}
+
+.popover-section-tabs {
+    display: flex;
+    gap: 3px;
+    margin-bottom: 6px;
+    background: #f1f5f9;
+    padding: 2px;
+    border-radius: 7px;
+    overflow-x: auto;
+}
+
+.popover-tab-btn {
+    flex: 1;
+    padding: 3px 5px;
+    font-size: 0.65rem;
+    font-weight: 700;
+    border: none;
+    background: transparent;
+    color: #475569;
+    border-radius: 5px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.15s ease;
+    text-align: center;
+}
+
+.popover-tab-btn.active {
+    background: #ffffff;
+    color: #1e40af;
+    box-shadow: 0 1.5px 5px rgba(0, 0, 0, 0.08);
+}
+
+.popover-tab-btn:hover:not(.active) {
+    color: #0f172a;
+    background: rgba(255, 255, 255, 0.6);
+}
+
+.popover-chart-container {
+    position: relative;
+    height: 145px;
+    width: 100%;
+    margin-bottom: 8px;
+}
+
+.popover-edit-section {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 6px 8px;
+}
+
+.popover-edit-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 5px;
+    font-size: 0.67rem;
+    font-weight: 800;
+    color: #334155;
+}
+
+.popover-edit-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px;
+}
+
+.popover-metric-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.popover-metric-label {
+    font-size: 0.62rem;
+    font-weight: 700;
+    color: #475569;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.popover-metric-input,
+.popover-metric-select {
+    width: 100%;
+    padding: 3px 6px;
+    border: 1px solid #cbd5e1;
+    border-radius: 5px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #1e293b;
+    background: #ffffff;
+    outline: none;
+    box-sizing: border-box;
+    min-height: 24px;
+    transition: all 0.15s ease;
+}
+
+.popover-metric-input:focus,
+.popover-metric-select:focus {
+    border-color: #2563eb;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+}
+
 .allover-excel-table td {
     padding: 0.3rem 0.45rem;
     border: 1px solid #cbd5e1;
@@ -7412,12 +7781,21 @@ body:not(.light-mode) .page-copyright {
     color: inherit;
     outline: none;
     padding: 2px 4px;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+    cursor: text;
+}
+
+.allover-excel-table input:hover {
+    border-color: #cbd5e1;
+    background: #f8fafc;
 }
 
 .allover-excel-table input:focus {
     background: #eff6ff;
     border-color: #3b82f6;
-    border-radius: 4px;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+    color: #0f172a;
 }
 
 /* Evaluation Sheet Table */
@@ -7536,22 +7914,31 @@ body:not(.light-mode) .page-copyright {
 
 .evaluation-matrix-table input {
     width: 100%;
-    max-width: 32px;
-    border: 1px solid transparent;
-    background: transparent;
+    max-width: 36px;
+    border: 1px solid #cbd5e1;
+    background: #f8fafc;
     font-family: inherit;
-    font-size: 0.76rem;
+    font-size: 0.78rem;
     font-weight: 700;
     text-align: center;
     color: #1e293b;
     outline: none;
     border-radius: 4px;
-    padding: 2px 0;
+    padding: 3px 1px;
+    transition: all 0.2s ease;
+    cursor: text;
+}
+
+.evaluation-matrix-table input:hover {
+    border-color: #3b82f6;
+    background: #eff6ff;
 }
 
 .evaluation-matrix-table input:focus {
     border-color: #1d4ed8;
-    background: #eff6ff;
+    background: #ffffff;
+    box-shadow: 0 0 0 2px rgba(29, 78, 216, 0.25);
+    color: #0f172a;
 }
 
 /* ==========================================================================

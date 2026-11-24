@@ -993,6 +993,9 @@
           <div id="manager-trainer-filters" class="trainer-filter-row"></div>
         </div>
 
+        <!-- Selected Trainer Center Name Display -->
+        <div id="manager-selected-trainer-display" class="manager-selected-trainer-display" style="display: none;"></div>
+
         <div id="manager-stats-container" class="dashboard-stats-grid">
           <!-- Dynamic Stats Cards -->
         </div>
@@ -1102,6 +1105,7 @@
 
       <div class="chatbot-input-area">
         <input type="text" id="chatbot-input" placeholder="Type your question..."
+          style="color: #0f172a !important; -webkit-text-fill-color: #0f172a !important; background: #f8fafc; color-scheme: light;"
           onkeypress="if(event.key === 'Enter') chatbot.handleSend()">
         <button id="chatbot-send" onclick="chatbot.handleSend()">
           <i data-lucide="send"></i>
@@ -1118,9 +1122,9 @@
 
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
-  <script src="firebase-config.js"></script>
-  <script src="chatbot.js"></script>
-  <script src="app.js"></script>
+  <script src="firebase-config.js?v=20261124_04"></script>
+  <script src="chatbot.js?v=20261124_04"></script>
+  <script src="app.js?v=20261124_04"></script>
 </body>
 
 </html>

@@ -5,8 +5,13 @@
 
 const chatbot = {
     // API Configuration
-    API_KEY: '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',
-    MODEL: 'openrouter/free',
+    API_KEY: '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',
+    MODELS: [
+        'openrouter/free',
+        'nvidia/nemotron-3-ultra-550b-a55b:free',
+        'google/gemma-4-26b-a4b-it:free',
+        'liquid/lfm-3-1.7b:free'
+    ],
     
     // State
     history: [],
@@ -84,45 +89,162 @@ const chatbot = {
     getContext() {
         const appGlobal = window.app || (typeof app !== 'undefined' ? app : null);
         if (!appGlobal || !appGlobal.accounts || !appGlobal.trainers) {
-            return "بيانات النظام غير متوفرة حالياً.";
+            return "System data is currently unavailable.";
         }
 
-        const totalAccounts = appGlobal.accounts.length;
-        const totalTrainers = appGlobal.trainers.length;
+        const validTrainers = (appGlobal.trainers || []).filter(t => t && typeof t === 'object' && t.name);
+        const validAccounts = (appGlobal.accounts || []).filter(a => a && typeof a === 'object' && a.name);
+        const validLeaders = (appGlobal.leaders || []).filter(l => l && typeof l === 'object' && l.name);
+
+        const totalAccounts = validAccounts.length;
+        const totalTrainers = validTrainers.length;
+        const totalLeaders = validLeaders.length;
         
-        const allPitches = appGlobal.trainers.flatMap(t => t.pitchResults || []);
+        const allPitches = validTrainers.flatMap(t => t.pitchResults || []);
         const totalBatches = allPitches.length;
-        const totalTrainees = allPitches.reduce((sum, p) => sum + (parseInt(p.total) || 0), 0);
+        const totalTrainees = allPitches.reduce((sum, p) => sum + (parseInt(p.total) || ((parseInt(p.pass) || 0) + (parseInt(p.fail) || 0))), 0);
         const totalPass = allPitches.reduce((sum, p) => sum + (parseInt(p.pass) || 0), 0);
         
-        // Group trainers by Account for clear project mapping
-        const projectsSummary = appGlobal.accounts.map(acc => {
-            const assignedTrainers = appGlobal.trainers.filter(t => 
-                t.accountId === acc.id || (t.secondaryAccountIds && t.secondaryAccountIds.includes(acc.id))
-            );
-            const names = assignedTrainers.map(t => t.name).join(', ');
-            return `- المشروع/الحساب: ${acc.name}. المدربون المخصصون لهذا المشروع هم: [${names || 'لا يوجد مدربون مخصصون حالياً'}]`;
+        // 1. Group trainers by Team / Leader (Crucial for queries like "team noor", "team raghda")
+        const leadersSummary = validLeaders.map(leader => {
+            const teamTrainers = validTrainers.filter(t => {
+                if (typeof appGlobal.isTrainerUnderLeader === 'function') {
+                    return appGlobal.isTrainerUnderLeader(t, leader);
+                }
+                const lId = String(leader.id);
+                const lUser = (leader.user || '').toLowerCase().trim();
+                const lName = (leader.name || '').toLowerCase().trim();
+                const tLead = String(t.leaderId || '').toLowerCase().trim();
+                return tLead === lId || tLead === lUser || tLead === lName;
+            });
+            const names = teamTrainers.map(t => t.name).join(', ');
+            return `- Team / Leader: "${leader.name}" (Username / Alias: "${leader.user || 'N/A'}", ID: ${leader.id}). Total trainers: ${teamTrainers.length}. Assigned trainers: [${names || 'None'}]`;
         }).join('\n');
 
-        const trainersDetails = appGlobal.trainers.map(t => {
-            const primaryAcc = appGlobal.accounts.find(a => a.id === t.accountId)?.name || 'N/A';
-            const secondaryAccs = (t.secondaryAccountIds || []).map(id => appGlobal.accounts.find(a => a.id === id)?.name).filter(Boolean).join(', ');
+        // 2. Group trainers by Account for clear project mapping
+        const projectsSummary = validAccounts.map(acc => {
+            const assignedTrainers = validTrainers.filter(t => 
+                String(t.accountId) === String(acc.id) || (t.secondaryAccountIds && t.secondaryAccountIds.map(String).includes(String(acc.id)))
+            );
+            const names = assignedTrainers.map(t => t.name).join(', ');
+            return `- Account/Project: "${acc.name}". Assigned trainers: [${names || 'None'}]`;
+        }).join('\n');
+
+        // 3. Detailed Trainer Records
+        const trainersDetails = validTrainers.map(t => {
+            const primaryAcc = validAccounts.find(a => String(a.id) === String(t.accountId))?.name || 'N/A';
+            const secondaryAccs = (t.secondaryAccountIds || []).map(id => validAccounts.find(a => String(a.id) === String(id))?.name).filter(Boolean).join(', ');
+            const leaderObj = validLeaders.find(l => {
+                if (typeof appGlobal.isTrainerUnderLeader === 'function') return appGlobal.isTrainerUnderLeader(t, l);
+                return String(t.leaderId) === String(l.id);
+            });
+            const leadName = leaderObj ? `${leaderObj.name} (${leaderObj.user || ''})` : 'Unassigned';
             const pitches = t.pitchResults || [];
-            const pitchHistory = pitches.map(p => `Batch ${p.batch}: (Total:${p.total}, Pass:${p.pass}, Fail:${p.fail})`).join(' | ');
-            return `- المدرب: ${t.name}. الحساب الرئيسي: ${primaryAcc}. حسابات إضافية: ${secondaryAccs || 'لا يوجد'}. السجل التدريبي: ${pitchHistory || 'لا يوجد سجل حالياً'}`;
+            const pitchHistory = pitches.map(p => `Batch ${p.batch}: (Total:${p.total || ((parseInt(p.pass)||0)+(parseInt(p.fail)||0))}, Pass:${p.pass}, Fail:${p.fail})`).join(' | ');
+            return `- Trainer: ${t.name}. Team/Leader: ${leadName}. Main Account: ${primaryAcc}. Secondary: ${secondaryAccs || 'None'}. Batches: ${pitchHistory || 'None'}`;
         }).join('\n');
 
         return `
-            سياق النظام الحالي (ISON System Data):
-            - إجمالي الحسابات (المشاريع): ${totalAccounts} | إجمالي المدربين: ${totalTrainers}
-            - إجمالي الباتشات: ${totalBatches} | إجمالي المتدربين: ${totalTrainees} | إجمالي الناجحين: ${totalPass}
-            
-            1. خريطة توزيع المدربين على المشاريع (Who is where):
-            ${projectsSummary}
+Current System Data Context (ISON Training System):
+- Total Accounts: ${totalAccounts} | Total Trainers: ${totalTrainers} | Total Leaders: ${totalLeaders}
+- Total Batches: ${totalBatches} | Total Trainees: ${totalTrainees} | Total Pass: ${totalPass}
 
-            2. تفاصيل السجل التدريبي لكل مدرب:
-            ${trainersDetails}
+1. Teams & Team Leaders (Trainers in each Team):
+${leadersSummary}
+
+2. Accounts & Assigned Trainers:
+${projectsSummary}
+
+3. Detailed Trainer Records & Batches:
+${trainersDetails}
         `;
+    },
+
+    findLocalAnswer(query) {
+        const appGlobal = window.app || (typeof app !== 'undefined' ? app : null);
+        if (!appGlobal || !appGlobal.trainers) return null;
+
+        const validTrainers = (appGlobal.trainers || []).filter(t => t && typeof t === 'object' && t.name);
+        const validAccounts = (appGlobal.accounts || []).filter(a => a && typeof a === 'object' && a.name);
+        const validLeaders = (appGlobal.leaders || []).filter(l => l && typeof l === 'object' && l.name);
+        const isArabic = /[\u0600-\u06FF]/.test(query);
+        const q = query.toLowerCase().trim();
+
+        // 1. Team / Leader Inquiry: e.g. "how many trainers in the team noor", "team noor", "كم عدد المدربين في فريق نور", "فريق نور"
+        for (const leader of validLeaders) {
+            const lUser = (leader.user || '').toLowerCase().trim();
+            const lName = (leader.name || '').toLowerCase().trim();
+            const lNameParts = lName.split(' ').map(p => p.trim()).filter(p => p.length >= 3);
+
+            let isMatch = false;
+            if (lUser && q.includes(lUser)) isMatch = true;
+            if (lName && q.includes(lName)) isMatch = true;
+            if (lNameParts.some(part => q.includes(part))) isMatch = true;
+
+            // Arabic normalization for Noor / Nada / Raghda
+            if (lUser === 'noor' && (q.includes('noor') || q.includes('nour') || q.includes('نور'))) isMatch = true;
+            if (lUser === 'nada' && (q.includes('nada') || q.includes('ندى') || q.includes('ندا'))) isMatch = true;
+            if (lUser.toLowerCase() === 'raghda' && (q.includes('raghda') || q.includes('رغدة') || q.includes('رغده'))) isMatch = true;
+
+            if (isMatch && (q.includes('team') || q.includes('فريق') || q.includes('trainer') || q.includes('مدرب') || q.includes('how many') || q.includes('who') || q.includes('مين') || q.includes('count') || q.includes('عدد'))) {
+                const teamTrainers = validTrainers.filter(t => {
+                    if (typeof appGlobal.isTrainerUnderLeader === 'function') {
+                        return appGlobal.isTrainerUnderLeader(t, leader);
+                    }
+                    const lId = String(leader.id);
+                    const tLead = String(t.leaderId || '').toLowerCase().trim();
+                    return tLead === lId || tLead === lUser || tLead === lName;
+                });
+
+                const count = teamTrainers.length;
+                const trainerList = teamTrainers.map((t, idx) => `${idx + 1}. **${t.name}**`).join('\n');
+
+                if (isArabic) {
+                    return `يوجد **${count} مدرباً** في **فريق ${leader.name}** (Team ${leader.user || leader.name}):\n\n${trainerList || 'لا يوجد مدربون مسجلون في هذا الفريق حالياً.'}`;
+                } else {
+                    return `There are **${count} trainers** in **Team ${leader.name}** (Team ${leader.user || leader.name}):\n\n${trainerList || 'No trainers are currently assigned to this team.'}`;
+                }
+            }
+        }
+
+        // 2. Direct Batch Search: e.g. "who is the trainer batch 200", "batch 200", "باتش 200"
+        const batchMatch = q.match(/(?:batch|باتش)\s*#?([a-zA-Z0-9_\-]+)/i) || q.match(/(?:^|\s)#?([0-9]{2,4})(?:\s|$)/);
+        if (batchMatch) {
+            const targetBatch = batchMatch[1].trim().toLowerCase();
+            for (const t of validTrainers) {
+                if (!t.pitchResults || !Array.isArray(t.pitchResults)) continue;
+                const foundPitch = t.pitchResults.find(p => p && String(p.batch).trim().toLowerCase() === targetBatch);
+                if (foundPitch) {
+                    const acc = validAccounts.find(a => String(a.id) === String(t.accountId))?.name || '';
+                    const pass = parseInt(foundPitch.pass) || 0;
+                    const fail = parseInt(foundPitch.fail) || 0;
+                    const total = parseInt(foundPitch.total) || (pass + fail);
+                    const rate = total > 0 ? ((pass / total) * 100).toFixed(1) : '0.0';
+
+                    if (isArabic) {
+                        return `المدرب المسؤول عن **باتش ${foundPitch.batch}** هو **${t.name}**${acc ? ` (مشروع ${acc})` : ''}.\n\n📊 **نتائج الباتش:**\n- إجمالي المتدربين: ${total}\n- عدد الناجحين: ${pass}\n- عدد الراسبين: ${fail}\n- نسبة النجاح: ${rate}%\n[CHART:{"pass":${pass}, "fail":${fail}, "total":${total}, "batch":"${foundPitch.batch}"}]`;
+                    } else {
+                        return `The trainer for **Batch ${foundPitch.batch}** is **${t.name}**${acc ? ` (${acc})` : ''}.\n\n📊 **Batch Stats:**\n- Total Trainees: ${total}\n- Passed: ${pass}\n- Failed: ${fail}\n- Pass Rate: ${rate}%\n[CHART:{"pass":${pass}, "fail":${fail}, "total":${total}, "batch":"${foundPitch.batch}"}]`;
+                    }
+                }
+            }
+        }
+
+        // 3. Direct Trainer Name Search: e.g. "who is sohila", "sohila abdallah", "مين سهيلة"
+        for (const t of validTrainers) {
+            const tNameLower = t.name.toLowerCase();
+            if (q.includes(tNameLower) || tNameLower.split(' ').some(part => part.length >= 4 && q.includes(part))) {
+                const acc = validAccounts.find(a => String(a.id) === String(t.accountId))?.name || 'N/A';
+                const pitches = (t.pitchResults || []).map(p => `Batch ${p.batch} (Pass: ${p.pass}, Fail: ${p.fail})`).join(', ');
+                if (isArabic) {
+                    return `**المدرب: ${t.name}**\n- المشروع الأساسي: ${acc}\n- الحالة: ${t.status || 'Active'}\n- السجل التدريبي: ${pitches || 'لا يوجد باتشات مسجلة حالياً'}`;
+                } else {
+                    return `**Trainer: ${t.name}**\n- Main Project: ${acc}\n- Status: ${t.status || 'Active'}\n- Batches: ${pitches || 'No batches recorded yet'}`;
+                }
+            }
+        }
+
+        return null;
     },
 
     async handleSend() {
@@ -130,6 +252,7 @@ const chatbot = {
         const text = input.value.trim();
         if (!text) return;
 
+        const isArabic = /[\u0600-\u06FF]/.test(text);
         this.addMessage('user', text);
         input.value = '';
 
@@ -137,12 +260,36 @@ const chatbot = {
         if (typing) typing.classList.remove('hidden');
 
         try {
-            const response = await this.sendMessageToAI(text);
+            // First check local system database resolver for immediate accurate answer
+            const localAns = this.findLocalAnswer(text);
+            let response = null;
+
+            try {
+                response = await this.sendMessageToAI(text);
+            } catch (apiErr) {
+                console.warn("AI API request failed, checking local database fallback:", apiErr);
+                if (localAns) {
+                    response = localAns;
+                } else {
+                    throw apiErr;
+                }
+            }
+
             if (typing) typing.classList.add('hidden');
             this.addMessage('bot', response);
         } catch (err) {
             if (typing) typing.classList.add('hidden');
-            this.addMessage('bot', 'عذراً، حدث خطأ أثناء الاتصال بالخادم. يرجى المحاولة لاحقاً.');
+            // Check local answer again as last resort
+            const localFallback = this.findLocalAnswer(text);
+            if (localFallback) {
+                this.addMessage('bot', localFallback);
+                return;
+            }
+
+            const errorMsg = isArabic
+                ? 'عذراً، حدث خطأ أثناء الاتصال بالخادم. يرجى المحاولة لاحقاً.'
+                : 'Sorry, could not connect to the AI service. Please try again in a few moments.';
+            this.addMessage('bot', errorMsg);
             console.error("Chatbot Error:", err);
         }
     },
@@ -215,29 +362,59 @@ const chatbot = {
 
     async sendMessageToAI(userMessage) {
         const context = this.getContext();
-        const payload = {
-            model: this.MODEL,
-            messages: [
-                this.history[0], 
-                { role: 'system', content: `Current System Data Context: ${context}` },
-                ...this.history.slice(1).slice(-6)
-            ]
-        };
+        const baseSystemPrompt = this.history[0]?.content || "You are a smart assistant for the ISON Training Management System. Answer in the same language as the user's question.";
+        const fullSystemMessage = `${baseSystemPrompt}\n\n${context}`;
 
-        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${this.API_KEY}`,
-                'HTTP-Referer': 'https://ison-training.com',
-                'X-Title': 'ISON Training System'
-            },
-            body: JSON.stringify(payload)
-        });
+        const messages = [
+            { role: 'system', content: fullSystemMessage },
+            ...this.history.slice(1).slice(-6)
+        ];
 
-        if (!response.ok) throw new Error(`API Error: ${response.status}`);
-        const data = await response.json();
-        return data.choices[0].message.content;
+        let lastError = null;
+
+        for (const model of this.MODELS) {
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 18000);
+
+                const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${this.API_KEY}`,
+                        'HTTP-Referer': 'https://ison-training.com',
+                        'X-Title': 'ISON Training System'
+                    },
+                    body: JSON.stringify({
+                        model: model,
+                        messages: messages
+                    }),
+                    signal: controller.signal
+                });
+
+                clearTimeout(timeoutId);
+
+                if (!response.ok) {
+                    const errBody = await response.text().catch(() => '');
+                    console.warn(`OpenRouter model ${model} returned HTTP ${response.status}:`, errBody);
+                    lastError = new Error(`API Error ${response.status}`);
+                    continue; // Try next fallback model
+                }
+
+                const data = await response.json();
+                if (data && data.choices && data.choices.length > 0 && data.choices[0].message) {
+                    const content = data.choices[0].message.content;
+                    if (content && content.trim()) {
+                        return content.trim();
+                    }
+                }
+            } catch (netErr) {
+                console.warn(`Error contacting OpenRouter model ${model}:`, netErr);
+                lastError = netErr;
+            }
+        }
+
+        throw lastError || new Error("Failed to receive response from AI models");
     }
 };
 

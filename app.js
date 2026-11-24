@@ -2,7 +2,7 @@ var app = {
     // Initial Data
     accounts: JSON.parse(localStorage.getItem('accounts')) || [],
 
-    trainers: JSON.parse(localStorage.getItem('trainers')) || [],
+    trainers: (JSON.parse(localStorage.getItem('trainers')) || []).filter(t => t && t.name !== 'Ahmed Mohamed' && String(t.id) !== '1788364321859' && t.username !== 'ahmed'),
     leaders: JSON.parse(localStorage.getItem('leaders')) || [],
     managers: JSON.parse(localStorage.getItem('managers')) || [],
 
@@ -23,10 +23,22 @@ var app = {
     targetCategoryView: null, // To store where to go after selection
     selectedAccountCategory: 'all', // 'all', 'vodafone', 'national', 'offshore'
 
+    batchChartInstance: null,
+    batchChartHideTimeout: null,
+    batchChartPinned: false,
+    activeBatchChartSection: 'section1',
+    activeBatchChartTrainerId: null,
+    activeBatchChartMonthKey: null,
 
     currentExcelTab: null,
 
     init() {
+        // Sanitize core collections to eliminate any null/undefined entries and purge removed records
+        this.trainers = (this.trainers || []).filter(t => t && typeof t === 'object' && t.name && t.name !== 'Ahmed Mohamed' && String(t.id) !== '1788364321859');
+        this.accounts = (this.accounts || []).filter(a => a && typeof a === 'object');
+        this.leaders = (this.leaders || []).filter(l => l && typeof l === 'object');
+        this.managers = (this.managers || []).filter(m => m && typeof m === 'object');
+
         lucide.createIcons();
         this.setupEventListeners();
         this.checkLogin();
@@ -47,15 +59,17 @@ var app = {
 
         // Initialize categories & multi-account accountIds for existing data
         let modified = false;
-        this.accounts.forEach(a => { if (!a.category) { a.category = 'national'; modified = true; } });
+        this.accounts.forEach(a => { if (a && !a.category) { a.category = 'national'; modified = true; } });
         this.leaders.forEach(l => {
-            if (!l.category) { l.category = 'national'; modified = true; }
-            if (!Array.isArray(l.accountIds)) {
-                l.accountIds = l.accountId ? [String(l.accountId)] : [];
-                modified = true;
-            } else if (l.accountId && !l.accountIds.includes(String(l.accountId))) {
-                l.accountIds.push(String(l.accountId));
-                modified = true;
+            if (l) {
+                if (!l.category) { l.category = 'national'; modified = true; }
+                if (!Array.isArray(l.accountIds)) {
+                    l.accountIds = l.accountId ? [String(l.accountId)] : [];
+                    modified = true;
+                } else if (l.accountId && !l.accountIds.includes(String(l.accountId))) {
+                    l.accountIds.push(String(l.accountId));
+                    modified = true;
+                }
             }
         });
         if (modified) this.saveData();
@@ -64,7 +78,7 @@ var app = {
         if (this.trainers && Array.isArray(this.trainers)) {
             let trainersModified = false;
             this.trainers.forEach(t => {
-                if (t.img && (t.img.includes('pravatar.cc') || t.img.includes('placehold.co'))) {
+                if (t && t.img && (t.img.includes('pravatar.cc') || t.img.includes('placehold.co'))) {
                     t.img = '';
                     trainersModified = true;
                 }
@@ -96,8 +110,9 @@ var app = {
 
     ensureTrainerBatches() {
         if (!this.trainers || !Array.isArray(this.trainers)) return;
+        this.trainers = this.trainers.filter(t => t && typeof t === 'object');
         this.trainers.forEach(t => {
-            if (!Array.isArray(t.pitchResults)) {
+            if (t && !Array.isArray(t.pitchResults)) {
                 t.pitchResults = [];
             }
         });
@@ -105,10 +120,12 @@ var app = {
 
     cleanupSystemBatches() {
         if (!this.trainers || !Array.isArray(this.trainers)) return;
+        this.trainers = this.trainers.filter(t => t && typeof t === 'object');
         let modified = false;
         const sampleBatchNumbers = ['101', '102', '103', '104', '105', '106', '107', '108', '109', '110', '111', '112', '113', '114', '115', '116'];
 
         this.trainers.forEach(t => {
+            if (!t) return;
             if (Array.isArray(t.pitchResults)) {
                 const initialLen = t.pitchResults.length;
                 t.pitchResults = t.pitchResults.filter(p => {
@@ -126,7 +143,7 @@ var app = {
         });
 
         if (this.currentUser && this.currentUser.role === 'trainer') {
-            const currentT = this.trainers.find(t => t.id === this.currentUser.id);
+            const currentT = this.trainers.find(t => t && t.id === this.currentUser.id);
             if (currentT) {
                 this.currentUser.pitchResults = currentT.pitchResults || [];
                 localStorage.setItem('currentUser', JSON.stringify(this.currentUser));
@@ -383,6 +400,14 @@ var app = {
                     const card = dd.closest('.trainer-card, .leader-trainer-card');
                     if (card) card.classList.remove('status-dropdown-active');
                 });
+            }
+
+            // Close batch chart popover when clicking outside
+            if (this.batchChartPinned) {
+                const popover = document.getElementById('batch-chart-popover');
+                if (popover && !popover.classList.contains('hidden') && !popover.contains(e.target) && !e.target.closest('.allover-batch-th') && !e.target.closest('.batch-chart-trigger-btn')) {
+                    this.closeBatchChartPopover();
+                }
             }
         });
     },
@@ -1763,7 +1788,7 @@ var app = {
 
     async deleteManager(id) {
         if (await this.showConfirm('Are you sure you want to delete this manager account?')) {
-            this.managers = this.managers.filter(m => m.id !== id);
+            this.managers = (this.managers || []).filter(m => m && String(m.id) !== String(id));
             this.saveData();
             this.renderManagers();
             this.showAlert('Manager deleted successfully', 'success');
@@ -2014,16 +2039,32 @@ var app = {
     },
 
     async deleteLeader(id) {
-        const leader = this.leaders.find(l => String(l.id) === String(id));
+        const targetId = String(id);
+        const leader = this.leaders.find(l => l && String(l.id) === targetId);
         const leaderName = leader ? leader.name : 'this leader';
         if (await this.showConfirm(`Are you sure you want to delete leader account "${leaderName}"?`)) {
-            const identifiers = leader ? this.getLeaderAllIdentifiers(leader) : [String(id)];
-            this.leaders = this.leaders.filter(l => 
+            const identifiers = leader ? this.getLeaderAllIdentifiers(leader) : [targetId];
+            this.leaders = (this.leaders || []).filter(l => 
+                l &&
                 !identifiers.includes(String(l.id)) &&
                 !identifiers.includes((l.user||'').toLowerCase()) &&
                 !identifiers.includes((l.name||'').toLowerCase())
             );
+
+            // Clean up leader references on trainers
+            (this.trainers || []).forEach(t => {
+                if (t && identifiers.includes(String(t.leaderId))) {
+                    t.leaderId = null;
+                }
+            });
+
             this.saveData();
+
+            if (window.TrainingFirebase && window.TrainingFirebase.isAvailable()) {
+                window.TrainingFirebase.saveCollection('systemData/leaders', this.leaders);
+                window.TrainingFirebase.saveCollection('systemData/trainers', this.trainers);
+            }
+
             this.renderLeaderAdmin();
             this.showAlert('Leader deleted successfully', 'success');
         }
@@ -2116,7 +2157,7 @@ var app = {
 
     async deleteMaterial(id) {
         if (await this.showConfirm('Do you want to delete this material?')) {
-            this.materials = this.materials.filter(m => m.id !== id);
+            this.materials = (this.materials || []).filter(m => m && String(m.id) !== String(id));
             this.saveData();
             this.renderMaterialAdmin();
             this.showAlert('Material deleted successfully', 'success');
@@ -2170,7 +2211,7 @@ var app = {
 
     async deleteVideo(id) {
         if (await this.showConfirm('Are you sure you want to delete the video?')) {
-            this.videos = this.videos.filter(v => v.id !== id);
+            this.videos = (this.videos || []).filter(v => v && String(v.id) !== String(id));
             this.saveData();
             this.renderVideoAdmin();
             this.showAlert('Video deleted successfully', 'success');
@@ -2226,7 +2267,7 @@ var app = {
 
     async deleteExam(accId) {
         if (await this.showConfirm('Are you sure you want to delete the exam programming for this account? All associated questions and results will be deleted.')) {
-            this.exams = this.exams.filter(e => e.accountId !== accId);
+            this.exams = (this.exams || []).filter(e => e && String(e.accountId) !== String(accId));
             this.saveData();
             this.renderExamAdmin();
             this.showAlert('Exam programming deleted successfully', 'success');
@@ -3035,14 +3076,33 @@ var app = {
             return;
         }
         if (await this.showConfirm('Are you sure you want to delete this account? All associated trainers will also be deleted.')) {
-            this.accounts = this.accounts.filter(acc => acc.id !== id);
-            this.trainers = this.trainers.filter(t => t.accountId !== id);
+            const targetAccId = String(id);
+            this.accounts = (this.accounts || []).filter(acc => acc && String(acc.id) !== targetAccId);
+            this.trainers = (this.trainers || []).filter(t => t && String(t.accountId) !== targetAccId);
             this.trainers.forEach(t => {
-                if (Array.isArray(t.secondaryAccountIds)) {
-                    t.secondaryAccountIds = t.secondaryAccountIds.filter(aid => String(aid) !== String(id));
+                if (t && Array.isArray(t.secondaryAccountIds)) {
+                    t.secondaryAccountIds = t.secondaryAccountIds.filter(aid => String(aid) !== targetAccId);
                 }
             });
+
+            // Also remove account references from leaders
+            (this.leaders || []).forEach(l => {
+                if (l) {
+                    if (String(l.accountId) === targetAccId) l.accountId = null;
+                    if (Array.isArray(l.accountIds)) {
+                        l.accountIds = l.accountIds.filter(aid => String(aid) !== targetAccId);
+                    }
+                }
+            });
+
             this.saveData();
+
+            if (window.TrainingFirebase && window.TrainingFirebase.isAvailable()) {
+                window.TrainingFirebase.saveCollection('systemData/accounts', this.accounts);
+                window.TrainingFirebase.saveCollection('systemData/trainers', this.trainers);
+                window.TrainingFirebase.saveCollection('systemData/leaders', this.leaders);
+            }
+
             this.renderAccounts();
             this.showAlert('Account deleted successfully', 'success');
         }
@@ -3469,12 +3529,25 @@ var app = {
         } else {
             if (await this.showConfirm(`Are you sure you want to delete leader "${leader.name}"?`)) {
                 const identifiers = this.getLeaderAllIdentifiers(leader);
-                this.leaders = this.leaders.filter(l => 
+                this.leaders = (this.leaders || []).filter(l => 
+                    l &&
                     !identifiers.includes(String(l.id)) &&
                     !identifiers.includes((l.user||'').toLowerCase()) &&
                     !identifiers.includes((l.name||'').toLowerCase())
                 );
+                (this.trainers || []).forEach(t => {
+                    if (t && identifiers.includes(String(t.leaderId))) {
+                        t.leaderId = null;
+                    }
+                });
+
                 this.saveData();
+
+                if (window.TrainingFirebase && window.TrainingFirebase.isAvailable()) {
+                    window.TrainingFirebase.saveCollection('systemData/leaders', this.leaders);
+                    window.TrainingFirebase.saveCollection('systemData/trainers', this.trainers);
+                }
+
                 this.renderAccountLeaders(accountId);
                 this.showAlert('Leader deleted successfully.', 'success');
             }
@@ -3588,11 +3661,21 @@ var app = {
             return;
         }
         if (await this.showConfirm('Are you sure you want to delete this trainer?')) {
-            const trainer = this.trainers.find(t => t.id === id);
+            const targetId = String(id);
+            const trainer = this.trainers.find(t => t && String(t.id) === targetId);
             const accId = trainer ? trainer.accountId : (this.currentAccount ? this.currentAccount.id : null);
             const leaderId = trainer ? trainer.leaderId : (this.currentLeader ? this.currentLeader.id : null);
-            this.trainers = this.trainers.filter(t => t.id !== id);
+
+            // Robust removal using string ID match
+            this.trainers = (this.trainers || []).filter(t => t && String(t.id) !== targetId);
+
             this.saveData();
+
+            // Direct guaranteed Firebase overwrite for trainers
+            if (window.TrainingFirebase && window.TrainingFirebase.isAvailable()) {
+                window.TrainingFirebase.saveCollection('systemData/trainers', this.trainers);
+            }
+
             this.renderTrainers(accId, leaderId);
             this.showAlert('Trainer deleted successfully', 'success');
         }
@@ -4347,7 +4430,7 @@ var app = {
 
     async deleteTrainerExam(id) {
         if (await this.showConfirm('Are you sure you want to delete this exam?')) {
-            this.exams = this.exams.filter(e => e.id !== id);
+            this.exams = (this.exams || []).filter(e => e && String(e.id) !== String(id));
             this.saveData();
             this.renderTrainerExams();
             this.showAlert('Quiz deleted successfully', 'success');
@@ -5433,9 +5516,9 @@ var app = {
 
     async deleteBatchResult(trainerId, batchId) {
         if (await this.showConfirm('Are you sure you want to delete this batch record?')) {
-            const trainer = this.trainers.find(t => t.id === trainerId);
+            const trainer = this.trainers.find(t => t && String(t.id) === String(trainerId));
             if (trainer && Array.isArray(trainer.pitchResults)) {
-                trainer.pitchResults = trainer.pitchResults.filter(p => p.id !== batchId);
+                trainer.pitchResults = trainer.pitchResults.filter(p => p && String(p.id) !== String(batchId));
                 if (this.currentUser && this.currentUser.id === trainerId) {
                     this.currentUser.pitchResults = [...trainer.pitchResults];
                 }
@@ -5962,7 +6045,9 @@ var app = {
     getDefaultAllOverData() {
         return {
             batchName: "Horizon SME Batch 22",
+            batchName2: "Horizon SME Batch 22",
             mentorBatchName: "Horizon SME Batch 21",
+            batchName4: "Horizon SME Batch 22",
             metrics: {
                 overallThroughputPct: "77%",
                 knowledgePct: "95%",
@@ -6371,7 +6456,7 @@ var app = {
                         <i data-lucide="layers" style="color: var(--primary);"></i> Overall Performance Summary (Over all) - ${selectedMonthObj.monthName} ${selectedMonthObj.year}
                     </h3>
                 </div>
-                ${this.renderAllOverTableHTML(monthData.allOverData, false, this.currentUser.id, activeMonthKey)}
+                ${this.renderAllOverTableHTML(monthData.allOverData, true, this.currentUser.id, activeMonthKey)}
             </div>` : ''}
         </div>
 
@@ -6384,7 +6469,7 @@ var app = {
                         <i data-lucide="users" style="color: var(--primary);"></i> Trainees Satisfaction & Evaluation Feedback - ${selectedMonthObj.monthName} ${selectedMonthObj.year}
                     </h3>
                 </div>
-                ${this.renderEvaluationTableHTML(monthData.evaluationData, false, this.currentUser.id, activeMonthKey)}
+                ${this.renderEvaluationTableHTML(monthData.evaluationData, true, this.currentUser.id, activeMonthKey)}
             </div>` : ''}
         </div>
         `;
@@ -6559,7 +6644,7 @@ var app = {
                                         <i data-lucide="layers" style="color: var(--primary);"></i> Overall Performance Summary (Over all)
                                     </h3>
                                 </div>
-                                ${this.renderAllOverTableHTML(monthData.allOverData, false, this.currentUser.id, monthKey)}
+                                ${this.renderAllOverTableHTML(monthData.allOverData, true, this.currentUser.id, monthKey)}
                             </div>`;
                     } else if (t === 'evaluation') {
                         pane.innerHTML = `
@@ -6569,7 +6654,7 @@ var app = {
                                         <i data-lucide="users" style="color: var(--primary);"></i> Trainees Satisfaction & Evaluation Feedback
                                     </h3>
                                 </div>
-                                ${this.renderEvaluationTableHTML(monthData.evaluationData, false, this.currentUser.id, monthKey)}
+                                ${this.renderEvaluationTableHTML(monthData.evaluationData, true, this.currentUser.id, monthKey)}
                             </div>`;
                     }
                 }
@@ -6579,13 +6664,17 @@ var app = {
         if (typeof lucide !== 'undefined') lucide.createIcons({ root: container || document.body });
     },
 
+    updateAllOverBatchName(trainerId, monthKey, value) {
+        this.updateAllOverField(trainerId, monthKey, 'batchName', value);
+    },
+
     updateAllOverField(trainerId, monthKey, key, value) {
         const trainer = this.trainers.find(t => t.id === trainerId) || (this.currentUser && this.currentUser.id === trainerId ? this.currentUser : null);
         if (!trainer) return;
         const monthData = this.getTrainerMonthlyKPI(trainerId, monthKey);
         if (!monthData.allOverData) monthData.allOverData = this.getDefaultAllOverData();
 
-        if (key === 'batchName' || key === 'mentorBatchName') {
+        if (key === 'batchName' || key === 'mentorBatchName' || key === 'batchName2' || key === 'batchName4') {
             monthData.allOverData[key] = value;
         } else {
             if (!monthData.allOverData.metrics) monthData.allOverData.metrics = {};
@@ -6595,14 +6684,41 @@ var app = {
                 const hc = parseFloat(monthData.allOverData.metrics.pass1stTimeHC) || 0;
                 const pass = parseFloat(monthData.allOverData.metrics.pass1stTimePass) || 0;
                 if (hc > 0) {
-                    monthData.allOverData.metrics.pass1stTimeAvg = `${Math.round((pass / hc) * 100)}%`;
+                    const avgStr = `${Math.round((pass / hc) * 100)}%`;
+                    monthData.allOverData.metrics.pass1stTimeAvg = avgStr;
+                    const avgInputs = document.querySelectorAll('input[data-key="pass1stTimeAvg"]');
+                    avgInputs.forEach(inp => { inp.value = avgStr; });
                 }
+            }
+
+            // Also keep paired Average input in sync if user changes the main column value
+            const pairedAvgInput = document.querySelector(`input[data-key="${key}Avg"]`);
+            if (pairedAvgInput && !monthData.allOverData.metrics[`${key}Avg`]) {
+                pairedAvgInput.value = value;
             }
         }
 
-        if (trainer.monthlyKPIs && trainer.monthlyKPIs[monthKey]) {
+        if (!trainer.monthlyKPIs) trainer.monthlyKPIs = {};
+        if (!trainer.monthlyKPIs[monthKey]) {
+            trainer.monthlyKPIs[monthKey] = {
+                scorecard: monthData.scorecard || this.getDefaultKPIScorecard(),
+                allOverData: monthData.allOverData,
+                evaluationData: monthData.evaluationData || this.getDefaultEvaluationData(),
+                isEvaluated: true,
+                evaluatedAt: new Date().toISOString()
+            };
+        } else {
             trainer.monthlyKPIs[monthKey].allOverData = monthData.allOverData;
         }
+
+        trainer.kpiAllOverData = monthData.allOverData;
+        if (this.currentUser && this.currentUser.id === trainerId) {
+            this.currentUser.monthlyKPIs = trainer.monthlyKPIs;
+            this.currentUser.kpiAllOverData = monthData.allOverData;
+            localStorage.setItem('currentUser', JSON.stringify(this.currentUser));
+        }
+
+        this.saveData();
     },
 
     updateEvaluationRating(trainerId, monthKey, qId, agentIndex, value) {
@@ -6611,16 +6727,34 @@ var app = {
         const monthData = this.getTrainerMonthlyKPI(trainerId, monthKey);
         if (!monthData.evaluationData) monthData.evaluationData = this.getDefaultEvaluationData();
 
-        const val = parseFloat(value) || 4;
+        const val = parseFloat(value) || 0;
         if (!monthData.evaluationData.ratings) monthData.evaluationData.ratings = {};
         if (!monthData.evaluationData.ratings[qId]) {
             monthData.evaluationData.ratings[qId] = Array(monthData.evaluationData.agentCount || 17).fill(4);
         }
         monthData.evaluationData.ratings[qId][agentIndex] = val;
 
-        if (trainer.monthlyKPIs && trainer.monthlyKPIs[monthKey]) {
+        if (!trainer.monthlyKPIs) trainer.monthlyKPIs = {};
+        if (!trainer.monthlyKPIs[monthKey]) {
+            trainer.monthlyKPIs[monthKey] = {
+                scorecard: monthData.scorecard || this.getDefaultKPIScorecard(),
+                allOverData: monthData.allOverData || this.getDefaultAllOverData(),
+                evaluationData: monthData.evaluationData,
+                isEvaluated: true,
+                evaluatedAt: new Date().toISOString()
+            };
+        } else {
             trainer.monthlyKPIs[monthKey].evaluationData = monthData.evaluationData;
         }
+
+        trainer.kpiEvaluationData = monthData.evaluationData;
+        if (this.currentUser && this.currentUser.id === trainerId) {
+            this.currentUser.monthlyKPIs = trainer.monthlyKPIs;
+            this.currentUser.kpiEvaluationData = monthData.evaluationData;
+            localStorage.setItem('currentUser', JSON.stringify(this.currentUser));
+        }
+
+        this.saveData();
 
         const modalPane = document.getElementById('modal-kpi-pane-evaluation');
         if (modalPane && modalPane.style.display !== 'none') {
@@ -6629,7 +6763,7 @@ var app = {
         }
         const trainerPane = document.getElementById('trainer-kpi-pane-evaluation');
         if (trainerPane && trainerPane.style.display !== 'none') {
-            trainerPane.innerHTML = `<div class="kpi-section-box glass" style="padding: 1rem 0.65rem; border-radius: 12px; overflow-x: auto;">${this.renderEvaluationTableHTML(monthData.evaluationData, false, trainerId, monthKey)}</div>`;
+            trainerPane.innerHTML = `<div class="kpi-section-box glass" style="padding: 1rem 0.65rem; border-radius: 12px; overflow-x: auto;">${this.renderEvaluationTableHTML(monthData.evaluationData, true, trainerId, monthKey)}</div>`;
             if (typeof lucide !== 'undefined') lucide.createIcons();
         }
     },
@@ -6724,18 +6858,453 @@ var app = {
         `;
     },
 
+    getOrCreateBatchPopoverEl() {
+        let el = document.getElementById('batch-chart-popover');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'batch-chart-popover';
+            el.className = 'batch-chart-popover hidden';
+            el.onmouseenter = () => {
+                if (this.batchChartHideTimeout) {
+                    clearTimeout(this.batchChartHideTimeout);
+                    this.batchChartHideTimeout = null;
+                }
+            };
+            el.onmouseleave = (e) => {
+                this.hideBatchChartPopover(e);
+            };
+            document.body.appendChild(el);
+        }
+        return el;
+    },
+
+    parseMetricPercent(val, fallback = 0) {
+        if (val === undefined || val === null || val === '') return fallback;
+        if (typeof val === 'number') return val;
+        const str = String(val).trim().toLowerCase();
+        if (str === 'yes' || str === 'pass') return 100;
+        if (str === 'no' || str === 'fail') return 0;
+        const num = parseFloat(str.replace(/[^0-9.-]/g, ''));
+        return isNaN(num) ? fallback : num;
+    },
+
+    showBatchChartPopover(event, trainerId, monthKey, sectionKey = 'section1') {
+        if (this.batchChartHideTimeout) {
+            clearTimeout(this.batchChartHideTimeout);
+            this.batchChartHideTimeout = null;
+        }
+
+        this.activeBatchChartTrainerId = trainerId;
+        this.activeBatchChartMonthKey = monthKey;
+        this.activeBatchChartSection = sectionKey;
+
+        const popover = this.getOrCreateBatchPopoverEl();
+        const triggerEl = event.currentTarget || event.target.closest('th') || event.target;
+
+        // Position popover relative to trigger element
+        const rect = triggerEl.getBoundingClientRect();
+        const popoverWidth = 385;
+        const popoverEstimatedHeight = 275;
+
+        let left = rect.left + (rect.width / 2) - (popoverWidth / 2);
+        if (left < 10) left = 10;
+        if (left + popoverWidth > window.innerWidth - 10) {
+            left = window.innerWidth - popoverWidth - 10;
+        }
+
+        let top = rect.bottom + 6;
+        // Check if bottom of popover would overflow viewport
+        if (top + popoverEstimatedHeight > window.innerHeight - 10) {
+            // If room above, flip above the header
+            if (rect.top - popoverEstimatedHeight - 6 >= 10) {
+                top = rect.top - popoverEstimatedHeight - 6;
+            } else {
+                // Otherwise clamp inside visible viewport
+                top = Math.max(10, window.innerHeight - popoverEstimatedHeight - 12);
+            }
+        }
+
+        popover.style.left = `${left}px`;
+        popover.style.top = `${top}px`;
+
+        this.renderBatchChartPopoverContent(trainerId, monthKey, sectionKey);
+        popover.classList.remove('hidden');
+    },
+
+    hideBatchChartPopover(event) {
+        if (this.batchChartPinned) return;
+        if (this.batchChartHideTimeout) clearTimeout(this.batchChartHideTimeout);
+        this.batchChartHideTimeout = setTimeout(() => {
+            const popover = document.getElementById('batch-chart-popover');
+            if (popover && !this.batchChartPinned) {
+                popover.classList.add('hidden');
+            }
+        }, 250);
+    },
+
+    toggleBatchChartPopover(event, trainerId, monthKey, sectionKey = 'section1') {
+        if (event) event.stopPropagation();
+        const popover = document.getElementById('batch-chart-popover');
+        if (popover && !popover.classList.contains('hidden') && this.batchChartPinned) {
+            this.closeBatchChartPopover();
+        } else {
+            this.batchChartPinned = true;
+            this.showBatchChartPopover(event, trainerId, monthKey, sectionKey);
+        }
+    },
+
+    closeBatchChartPopover() {
+        this.batchChartPinned = false;
+        if (this.batchChartHideTimeout) {
+            clearTimeout(this.batchChartHideTimeout);
+            this.batchChartHideTimeout = null;
+        }
+        const popover = document.getElementById('batch-chart-popover');
+        if (popover) {
+            popover.classList.add('hidden');
+        }
+    },
+
+    switchBatchChartSection(sectionKey) {
+        this.activeBatchChartSection = sectionKey;
+        if (this.activeBatchChartTrainerId && this.activeBatchChartMonthKey) {
+            this.renderBatchChartPopoverContent(this.activeBatchChartTrainerId, this.activeBatchChartMonthKey, sectionKey);
+        }
+    },
+
+    renderBatchChartPopoverContent(trainerId, monthKey, sectionKey) {
+        const monthData = this.getTrainerMonthlyKPI(trainerId, monthKey);
+        const ao = monthData.allOverData || this.getDefaultAllOverData();
+        const m = ao.metrics || {};
+
+        let batchTitle = ao.batchName || 'Horizon SME Batch 22';
+        if (sectionKey === 'section2') batchTitle = ao.batchName2 || ao.batchName || 'Horizon SME Batch 22';
+        else if (sectionKey === 'section3') batchTitle = ao.mentorBatchName || 'Horizon SME Batch 21';
+        else if (sectionKey === 'section4') batchTitle = ao.batchName4 || ao.batchName || 'Horizon SME Batch 22';
+
+        const popover = this.getOrCreateBatchPopoverEl();
+
+        let chartLabels = [];
+        let chartValues = [];
+        let chartColors = [];
+        let chartBorders = [];
+        let editControlsHTML = '';
+
+        if (sectionKey === 'section1') {
+            // Section 1: Overall Throughput
+            const throughput = this.parseMetricPercent(m.overallThroughputPct, 77);
+            const knowledge = this.parseMetricPercent(m.knowledgePct, 95);
+            const satisfaction = this.parseMetricPercent(m.satisfactionPct, 100);
+            const policies = (m.policiesCompliance || 'No').trim();
+            const policiesPct = policies.toLowerCase() === 'yes' ? 100 : 0;
+
+            chartLabels = ['Overall %', 'Knowledge', 'Satisfaction', 'Policies & Rules'];
+            chartValues = [throughput, knowledge, satisfaction, policiesPct];
+            chartColors = [
+                'rgba(37, 99, 235, 0.85)',
+                'rgba(14, 165, 233, 0.85)',
+                'rgba(16, 185, 129, 0.85)',
+                policiesPct > 0 ? 'rgba(139, 92, 246, 0.85)' : 'rgba(239, 68, 68, 0.85)'
+            ];
+            chartBorders = [
+                '#1d4ed8',
+                '#0284c7',
+                '#059669',
+                policiesPct > 0 ? '#7c3aed' : '#dc2626'
+            ];
+
+            editControlsHTML = `
+                <div class="popover-edit-grid">
+                    <div class="popover-metric-item">
+                        <label class="popover-metric-label">Overall Throughput (%)</label>
+                        <input type="text" class="popover-metric-input" value="${m.overallThroughputPct || '77%'}" 
+                            oninput="app.updateMetricFromPopover(${trainerId}, '${monthKey}', 'overallThroughputPct', this.value, 'section1')">
+                    </div>
+                    <div class="popover-metric-item">
+                        <label class="popover-metric-label">Knowledge & Updates Awareness</label>
+                        <input type="text" class="popover-metric-input" value="${m.knowledgePct || '95%'}" 
+                            oninput="app.updateMetricFromPopover(${trainerId}, '${monthKey}', 'knowledgePct', this.value, 'section1')">
+                    </div>
+                    <div class="popover-metric-item">
+                        <label class="popover-metric-label">Trainees Satisfaction (%)</label>
+                        <input type="text" class="popover-metric-input" value="${m.satisfactionPct || '100%'}" 
+                            oninput="app.updateMetricFromPopover(${trainerId}, '${monthKey}', 'satisfactionPct', this.value, 'section1')">
+                    </div>
+                    <div class="popover-metric-item">
+                        <label class="popover-metric-label">Policies Compliance</label>
+                        <select class="popover-metric-select" onchange="app.updateMetricFromPopover(${trainerId}, '${monthKey}', 'policiesCompliance', this.value, 'section1')">
+                            <option value="Yes" ${policies.toLowerCase() === 'yes' ? 'selected' : ''}>Yes (100%)</option>
+                            <option value="No" ${policies.toLowerCase() === 'no' ? 'selected' : ''}>No (0%)</option>
+                        </select>
+                    </div>
+                </div>
+            `;
+        } else if (sectionKey === 'section2') {
+            // Section 2: 1st Time Pass
+            const passAvg = this.parseMetricPercent(m.pass1stTimeAvg, 100);
+            const accurate = (m.accurateReports || 'yes').trim().toLowerCase() === 'yes' ? 100 : 0;
+            const coaching = (m.coachingDevelopment || 'yes').trim().toLowerCase() === 'yes' ? 100 : 0;
+
+            chartLabels = ['Pass Rate (%)', 'Accurate Reports', 'Coaching & Dev'];
+            chartValues = [passAvg, accurate, coaching];
+            chartColors = ['rgba(16, 185, 129, 0.85)', 'rgba(37, 99, 235, 0.85)', 'rgba(139, 92, 246, 0.85)'];
+            chartBorders = ['#059669', '#1d4ed8', '#7c3aed'];
+
+            editControlsHTML = `
+                <div class="popover-edit-grid">
+                    <div class="popover-metric-item">
+                        <label class="popover-metric-label">Headcount (HC)</label>
+                        <input type="number" class="popover-metric-input" value="${m.pass1stTimeHC || '17'}" 
+                            oninput="app.updateMetricFromPopover(${trainerId}, '${monthKey}', 'pass1stTimeHC', this.value, 'section2')">
+                    </div>
+                    <div class="popover-metric-item">
+                        <label class="popover-metric-label">Passed Trainees</label>
+                        <input type="number" class="popover-metric-input" value="${m.pass1stTimePass || '17'}" 
+                            oninput="app.updateMetricFromPopover(${trainerId}, '${monthKey}', 'pass1stTimePass', this.value, 'section2')">
+                    </div>
+                    <div class="popover-metric-item">
+                        <label class="popover-metric-label">Accurate Daily Reports</label>
+                        <select class="popover-metric-select" onchange="app.updateMetricFromPopover(${trainerId}, '${monthKey}', 'accurateReports', this.value, 'section2')">
+                            <option value="yes" ${(m.accurateReports || 'yes').toLowerCase() === 'yes' ? 'selected' : ''}>yes (100%)</option>
+                            <option value="no" ${(m.accurateReports || '').toLowerCase() === 'no' ? 'selected' : ''}>no (0%)</option>
+                        </select>
+                    </div>
+                    <div class="popover-metric-item">
+                        <label class="popover-metric-label">Coaching & Development</label>
+                        <select class="popover-metric-select" onchange="app.updateMetricFromPopover(${trainerId}, '${monthKey}', 'coachingDevelopment', this.value, 'section2')">
+                            <option value="yes" ${(m.coachingDevelopment || 'yes').toLowerCase() === 'yes' ? 'selected' : ''}>yes (100%)</option>
+                            <option value="no" ${(m.coachingDevelopment || '').toLowerCase() === 'no' ? 'selected' : ''}>no (0%)</option>
+                        </select>
+                    </div>
+                </div>
+            `;
+        } else if (sectionKey === 'section3') {
+            // Section 3: Mentors Feedback
+            const authNPS = this.parseMetricPercent(m.authNPS, 51);
+            const authRCS = this.parseMetricPercent(m.authRCS, 74);
+            const euNPS = this.parseMetricPercent(m.euNPS, 74);
+            const euRCS = this.parseMetricPercent(m.euRCS, 56);
+
+            chartLabels = ['Auth NPS', 'Auth RCS', 'EU NPS', 'EU RCS'];
+            chartValues = [authNPS, authRCS, euNPS, euRCS];
+            chartColors = ['rgba(245, 158, 11, 0.85)', 'rgba(37, 99, 235, 0.85)', 'rgba(16, 185, 129, 0.85)', 'rgba(139, 92, 246, 0.85)'];
+            chartBorders = ['#d97706', '#1d4ed8', '#059669', '#7c3aed'];
+
+            editControlsHTML = `
+                <div class="popover-edit-grid">
+                    <div class="popover-metric-item">
+                        <label class="popover-metric-label">Auth NPS (%)</label>
+                        <input type="text" class="popover-metric-input" value="${m.authNPS || '51%'}" 
+                            oninput="app.updateMetricFromPopover(${trainerId}, '${monthKey}', 'authNPS', this.value, 'section3')">
+                    </div>
+                    <div class="popover-metric-item">
+                        <label class="popover-metric-label">Auth RCS (%)</label>
+                        <input type="text" class="popover-metric-input" value="${m.authRCS || '74%'}" 
+                            oninput="app.updateMetricFromPopover(${trainerId}, '${monthKey}', 'authRCS', this.value, 'section3')">
+                    </div>
+                    <div class="popover-metric-item">
+                        <label class="popover-metric-label">EU NPS (%)</label>
+                        <input type="text" class="popover-metric-input" value="${m.euNPS || '74%'}" 
+                            oninput="app.updateMetricFromPopover(${trainerId}, '${monthKey}', 'euNPS', this.value, 'section3')">
+                    </div>
+                    <div class="popover-metric-item">
+                        <label class="popover-metric-label">EU RCS (%)</label>
+                        <input type="text" class="popover-metric-input" value="${m.euRCS || '56%'}" 
+                            oninput="app.updateMetricFromPopover(${trainerId}, '${monthKey}', 'euRCS', this.value, 'section3')">
+                    </div>
+                </div>
+            `;
+        } else if (sectionKey === 'section4') {
+            // Section 4: OJT Quality & NPS
+            const ojtNPS = this.parseMetricPercent(m.ojtNPS, 13);
+            const ojtQVal = (m.ojtQ || 'Pass').trim().toLowerCase() === 'pass' ? 100 : 0;
+
+            chartLabels = ['OJT NPS (%)', 'OJT Quality (Q)'];
+            chartValues = [ojtNPS, ojtQVal];
+            chartColors = ['rgba(239, 68, 68, 0.85)', 'rgba(16, 185, 129, 0.85)'];
+            chartBorders = ['#dc2626', '#059669'];
+
+            editControlsHTML = `
+                <div class="popover-edit-grid">
+                    <div class="popover-metric-item">
+                        <label class="popover-metric-label">OJT NPS (%)</label>
+                        <input type="text" class="popover-metric-input" value="${m.ojtNPS || '13%'}" 
+                            oninput="app.updateMetricFromPopover(${trainerId}, '${monthKey}', 'ojtNPS', this.value, 'section4')">
+                    </div>
+                    <div class="popover-metric-item">
+                        <label class="popover-metric-label">OJT Quality (Q)</label>
+                        <select class="popover-metric-select" onchange="app.updateMetricFromPopover(${trainerId}, '${monthKey}', 'ojtQ', this.value, 'section4')">
+                            <option value="Pass" ${(m.ojtQ || 'Pass').toLowerCase() === 'pass' ? 'selected' : ''}>Pass (100%)</option>
+                            <option value="Fail" ${(m.ojtQ || '').toLowerCase() === 'fail' ? 'selected' : ''}>Fail (0%)</option>
+                        </select>
+                    </div>
+                </div>
+            `;
+        }
+
+        popover.innerHTML = `
+            <div class="popover-header">
+                <div class="popover-title-group">
+                    <div class="popover-icon">
+                        <i data-lucide="bar-chart-3" style="width: 14px; height: 14px;"></i>
+                    </div>
+                    <div>
+                        <h4 class="popover-title">${batchTitle}</h4>
+                        <span class="popover-subtitle">Performance Rates & Metrics Chart</span>
+                    </div>
+                </div>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                    <button class="popover-close-btn" onclick="app.closeBatchChartPopover()" title="Close">×</button>
+                </div>
+            </div>
+
+            <div class="popover-section-tabs">
+                <button class="popover-tab-btn ${sectionKey === 'section1' ? 'active' : ''}" onclick="app.switchBatchChartSection('section1')">1. Overall %</button>
+                <button class="popover-tab-btn ${sectionKey === 'section2' ? 'active' : ''}" onclick="app.switchBatchChartSection('section2')">2. 1st Pass</button>
+                <button class="popover-tab-btn ${sectionKey === 'section3' ? 'active' : ''}" onclick="app.switchBatchChartSection('section3')">3. Mentors</button>
+                <button class="popover-tab-btn ${sectionKey === 'section4' ? 'active' : ''}" onclick="app.switchBatchChartSection('section4')">4. OJT</button>
+            </div>
+
+            <div class="popover-chart-container">
+                <canvas id="batch-popover-chart-canvas"></canvas>
+            </div>
+
+            <div class="popover-edit-section">
+                <div class="popover-edit-header">
+                    <span><i data-lucide="edit-3" style="width: 11px; height: 11px; display: inline-block; vertical-align: -1px;"></i> Quick Adjust Metric Values (Live Sync)</span>
+                </div>
+                ${editControlsHTML}
+            </div>
+        `;
+
+        if (typeof lucide !== 'undefined') {
+            lucide.createIcons({ root: popover });
+        }
+
+        // Render Chart.js Bar Chart
+        const ctxCanvas = document.getElementById('batch-popover-chart-canvas');
+        if (ctxCanvas) {
+            if (this.batchChartInstance) {
+                this.batchChartInstance.destroy();
+                this.batchChartInstance = null;
+            }
+
+            this.batchChartInstance = new Chart(ctxCanvas, {
+                type: 'bar',
+                data: {
+                    labels: chartLabels,
+                    datasets: [{
+                        label: 'Metric Value (%)',
+                        data: chartValues,
+                        backgroundColor: chartColors,
+                        borderColor: chartBorders,
+                        borderWidth: 1.5,
+                        borderRadius: 5,
+                        barThickness: 22,
+                        maxBarThickness: 30
+                    }]
+                },
+                plugins: [{
+                    id: 'topValueLabels',
+                    afterDatasetsDraw(chart) {
+                        const { ctx } = chart;
+                        chart.data.datasets.forEach((dataset, i) => {
+                            const meta = chart.getDatasetMeta(i);
+                            meta.data.forEach((bar, index) => {
+                                const value = dataset.data[index];
+                                if (value !== undefined && value !== null) {
+                                    ctx.save();
+                                    ctx.font = '800 10px Outfit, sans-serif';
+                                    ctx.fillStyle = '#0f172a';
+                                    ctx.textAlign = 'center';
+                                    ctx.textBaseline = 'bottom';
+                                    ctx.shadowColor = 'rgba(255, 255, 255, 0.9)';
+                                    ctx.shadowBlur = 4;
+                                    const displayVal = typeof value === 'number' ? (Number.isInteger(value) ? value : value.toFixed(1)) : value;
+                                    ctx.fillText(`${displayVal}%`, bar.x, Math.max(12, bar.y - 3));
+                                    ctx.restore();
+                                }
+                            });
+                        });
+                    }
+                }],
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: { duration: 250 },
+                    layout: {
+                        padding: {
+                            top: 16,
+                            left: 2,
+                            right: 2,
+                            bottom: 0
+                        }
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: 'rgba(15, 23, 42, 0.92)',
+                            titleFont: { family: 'Outfit', weight: '700', size: 11 },
+                            bodyFont: { family: 'Outfit', weight: '600', size: 11 },
+                            padding: 6,
+                            cornerRadius: 5,
+                            callbacks: {
+                                label: (ctx) => ` Value: ${ctx.parsed.y}%`
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            max: 115,
+                            ticks: {
+                                stepSize: 25,
+                                callback: (v) => v <= 100 ? v + '%' : '',
+                                font: { family: 'Outfit', weight: '600', size: 9 },
+                                color: '#64748b'
+                            },
+                            grid: { color: 'rgba(226, 232, 240, 0.7)' }
+                        },
+                        x: {
+                            ticks: {
+                                font: { family: 'Outfit', weight: '700', size: 9.5 },
+                                color: '#1e293b'
+                            },
+                            grid: { display: false }
+                        }
+                    }
+                }
+            });
+        }
+    },
+
+    updateMetricFromPopover(trainerId, monthKey, key, value, sectionKey = 'section1') {
+        this.updateAllOverField(trainerId, monthKey, key, value);
+
+        // Update main table cell input if visible
+        const tableInp = document.querySelector(`input[data-key="${key}"]`);
+        if (tableInp && tableInp.value !== value) {
+            tableInp.value = value;
+        }
+
+        // Re-render chart dataset smoothly
+        this.renderBatchChartPopoverContent(trainerId, monthKey, sectionKey);
+    },
+
     renderAllOverTableHTML(data, isEditable, trainerId, monthKey) {
         if (!data) data = this.getDefaultAllOverData();
         const m = data.metrics || {};
         const batch1 = data.batchName || 'Horizon SME Batch 22';
-        const mentorBatch = data.mentorBatchName || 'Horizon SME Batch 21';
+        const batch2 = data.batchName2 || data.batchName || 'Horizon SME Batch 22';
+        const batch3 = data.mentorBatchName || 'Horizon SME Batch 21';
+        const batch4 = data.batchName4 || data.batchName || 'Horizon SME Batch 22';
 
         const val = (key, fallback = '') => m[key] !== undefined ? m[key] : fallback;
 
         const cell = (key, fallback = '') => {
             const v = val(key, fallback);
             if (!isEditable) return `<span style="font-weight:700;">${v}</span>`;
-            return `<input type="text" value="${v}" onchange="app.updateAllOverField(${trainerId}, '${monthKey}', '${key}', this.value)">`;
+            return `<input type="text" data-key="${key}" value="${v}" onchange="app.updateAllOverField(${trainerId}, '${monthKey}', '${key}', this.value)">`;
         };
 
         return `
@@ -6756,7 +7325,14 @@ var app = {
                         <tr>
                             <th style="text-align: left; padding-left: 0.75rem;">Overall Throughput</th>
                             <th></th>
-                            <th>${isEditable ? `<input type="text" value="${batch1}" style="color:#ffffff; font-weight:700;" onchange="app.updateAllOverField(${trainerId}, '${monthKey}', 'batchName', this.value)">` : batch1}</th>
+                            <th class="allover-batch-th" onmouseenter="app.showBatchChartPopover(event, ${trainerId}, '${monthKey}', 'section1')" onmouseleave="app.hideBatchChartPopover(event)">
+                                <div class="allover-batch-wrapper">
+                                    ${isEditable ? `<input type="text" class="allover-batch-input" value="${batch1}" onchange="app.updateAllOverField(${trainerId}, '${monthKey}', 'batchName', this.value)" onmouseenter="app.showBatchChartPopover(event, ${trainerId}, '${monthKey}', 'section1')">` : `<span class="allover-batch-text">${batch1}</span>`}
+                                    <button type="button" class="batch-chart-trigger-btn" onclick="app.toggleBatchChartPopover(event, ${trainerId}, '${monthKey}', 'section1')" title="View & Edit Performance Chart">
+                                        <i data-lucide="bar-chart-2" style="width: 13px; height: 13px;"></i>
+                                    </button>
+                                </div>
+                            </th>
                             <th></th>
                             <th></th>
                             <th></th>
@@ -6770,7 +7346,7 @@ var app = {
                             <td></td>
                             <td></td>
                             <td></td>
-                            <td style="text-align: center; font-weight: 700;">${val('overallThroughputPct', '77%')}</td>
+                            <td style="text-align: center; font-weight: 700;" id="allover-avg-overallThroughputPct">${val('overallThroughputPct', '77%')}</td>
                             <td></td>
                         </tr>
                         <tr>
@@ -6780,7 +7356,7 @@ var app = {
                             <td></td>
                             <td></td>
                             <td></td>
-                            <td style="text-align: center; font-weight: 700;">${val('knowledgePct', '95%')}</td>
+                            <td style="text-align: center; font-weight: 700;" id="allover-avg-knowledgePct">${val('knowledgePct', '95%')}</td>
                             <td></td>
                         </tr>
                         <tr>
@@ -6790,7 +7366,7 @@ var app = {
                             <td></td>
                             <td></td>
                             <td></td>
-                            <td style="text-align: center; font-weight: 700;">${val('satisfactionPct', '100%')}</td>
+                            <td style="text-align: center; font-weight: 700;" id="allover-avg-satisfactionPct">${val('satisfactionPct', '100%')}</td>
                             <td></td>
                         </tr>
                         <tr>
@@ -6800,7 +7376,7 @@ var app = {
                             <td></td>
                             <td></td>
                             <td></td>
-                            <td style="text-align: center; font-weight: 700;">${val('policiesCompliance', 'No')}</td>
+                            <td style="text-align: center; font-weight: 700;" id="allover-avg-policiesCompliance">${val('policiesCompliance', 'No')}</td>
                             <td></td>
                         </tr>
 
@@ -6808,7 +7384,14 @@ var app = {
                         <tr>
                             <th style="text-align: left; padding-left: 0.75rem;">Number of trainees who passed from 1st time</th>
                             <th></th>
-                            <th>${isEditable ? `<input type="text" value="${batch1}" style="color:#ffffff; font-weight:700;" onchange="app.updateAllOverField(${trainerId}, '${monthKey}', 'batchName', this.value)">` : batch1}</th>
+                            <th class="allover-batch-th" onmouseenter="app.showBatchChartPopover(event, ${trainerId}, '${monthKey}', 'section2')" onmouseleave="app.hideBatchChartPopover(event)">
+                                <div class="allover-batch-wrapper">
+                                    ${isEditable ? `<input type="text" class="allover-batch-input" value="${batch2}" onchange="app.updateAllOverField(${trainerId}, '${monthKey}', 'batchName2', this.value)" onmouseenter="app.showBatchChartPopover(event, ${trainerId}, '${monthKey}', 'section2')">` : `<span class="allover-batch-text">${batch2}</span>`}
+                                    <button type="button" class="batch-chart-trigger-btn" onclick="app.toggleBatchChartPopover(event, ${trainerId}, '${monthKey}', 'section2')" title="View & Edit Performance Chart">
+                                        <i data-lucide="bar-chart-2" style="width: 13px; height: 13px;"></i>
+                                    </button>
+                                </div>
+                            </th>
                             <th></th>
                             <th></th>
                             <th></th>
@@ -6822,7 +7405,7 @@ var app = {
                             <td></td>
                             <td></td>
                             <td></td>
-                            <td style="text-align: center; font-weight: 700;">${val('pass1stTimeHC', '17')}</td>
+                            <td style="text-align: center; font-weight: 700;" id="allover-avg-pass1stTimeHC">${val('pass1stTimeHC', '17')}</td>
                             <td rowspan="2" style="text-align: center; font-weight: 800; background: #f8fafc; color: #059669; vertical-align: middle;">
                                 ${cell('pass1stTimeAvg', '100%')}
                             </td>
@@ -6834,7 +7417,7 @@ var app = {
                             <td></td>
                             <td></td>
                             <td></td>
-                            <td style="text-align: center; font-weight: 700;">${val('pass1stTimePass', '17')}</td>
+                            <td style="text-align: center; font-weight: 700;" id="allover-avg-pass1stTimePass">${val('pass1stTimePass', '17')}</td>
                         </tr>
                         <tr>
                             <td style="font-weight: 600;">Generating accurate reports Daily with matching the deadline at the end of each batch</td>
@@ -6843,7 +7426,7 @@ var app = {
                             <td></td>
                             <td></td>
                             <td></td>
-                            <td style="text-align: center; font-weight: 700;">${val('accurateReports', 'yes')}</td>
+                            <td style="text-align: center; font-weight: 700;" id="allover-avg-accurateReports">${val('accurateReports', 'yes')}</td>
                             <td></td>
                         </tr>
                         <tr>
@@ -6853,7 +7436,7 @@ var app = {
                             <td></td>
                             <td></td>
                             <td></td>
-                            <td style="text-align: center; font-weight: 700;">${val('coachingDevelopment', 'yes')}</td>
+                            <td style="text-align: center; font-weight: 700;" id="allover-avg-coachingDevelopment">${val('coachingDevelopment', 'yes')}</td>
                             <td></td>
                         </tr>
 
@@ -6861,7 +7444,14 @@ var app = {
                         <tr>
                             <th style="text-align: left; padding-left: 0.75rem;">Mentors' feedback (Operation, Client, Quality Control)</th>
                             <th>Target</th>
-                            <th>${isEditable ? `<input type="text" value="${mentorBatch}" style="color:#ffffff; font-weight:700;" onchange="app.updateAllOverField(${trainerId}, '${monthKey}', 'mentorBatchName', this.value)">` : mentorBatch}</th>
+                            <th class="allover-batch-th" onmouseenter="app.showBatchChartPopover(event, ${trainerId}, '${monthKey}', 'section3')" onmouseleave="app.hideBatchChartPopover(event)">
+                                <div class="allover-batch-wrapper">
+                                    ${isEditable ? `<input type="text" class="allover-batch-input" value="${batch3}" onchange="app.updateAllOverField(${trainerId}, '${monthKey}', 'mentorBatchName', this.value)" onmouseenter="app.showBatchChartPopover(event, ${trainerId}, '${monthKey}', 'section3')">` : `<span class="allover-batch-text">${batch3}</span>`}
+                                    <button type="button" class="batch-chart-trigger-btn" onclick="app.toggleBatchChartPopover(event, ${trainerId}, '${monthKey}', 'section3')" title="View & Edit Performance Chart">
+                                        <i data-lucide="bar-chart-2" style="width: 13px; height: 13px;"></i>
+                                    </button>
+                                </div>
+                            </th>
                             <th></th>
                             <th></th>
                             <th></th>
@@ -6875,7 +7465,7 @@ var app = {
                             <td></td>
                             <td></td>
                             <td></td>
-                            <td style="text-align: center; font-weight: 700;">${val('authNPS', '51%')}</td>
+                            <td style="text-align: center; font-weight: 700;" id="allover-avg-authNPS">${val('authNPS', '51%')}</td>
                             <td style="text-align: center; font-weight: 700; color: var(--primary);">${cell('authTargetNPS', '56%')}</td>
                         </tr>
                         <tr>
@@ -6884,7 +7474,7 @@ var app = {
                             <td></td>
                             <td></td>
                             <td></td>
-                            <td style="text-align: center; font-weight: 700;">${val('authRCS', '74%')}</td>
+                            <td style="text-align: center; font-weight: 700;" id="allover-avg-authRCS">${val('authRCS', '74%')}</td>
                             <td style="text-align: center; font-weight: 700; color: var(--primary);">${cell('authTargetRCS', '56%')}</td>
                         </tr>
                         <tr>
@@ -6894,7 +7484,7 @@ var app = {
                             <td></td>
                             <td></td>
                             <td></td>
-                            <td style="text-align: center; font-weight: 700;">${val('euNPS', '74%')}</td>
+                            <td style="text-align: center; font-weight: 700;" id="allover-avg-euNPS">${val('euNPS', '74%')}</td>
                             <td style="text-align: center; font-weight: 700; color: var(--primary);">${cell('euTargetNPS', '66%')}</td>
                         </tr>
                         <tr>
@@ -6903,7 +7493,7 @@ var app = {
                             <td></td>
                             <td></td>
                             <td></td>
-                            <td style="text-align: center; font-weight: 700;">${val('euRCS', '56%')}</td>
+                            <td style="text-align: center; font-weight: 700;" id="allover-avg-euRCS">${val('euRCS', '56%')}</td>
                             <td style="text-align: center; font-weight: 700; color: var(--primary);">${cell('euTargetRCS', '55%')}</td>
                         </tr>
 
@@ -6911,7 +7501,14 @@ var app = {
                         <tr>
                             <th style="text-align: left; padding-left: 0.75rem;">OJT Quality and NPS</th>
                             <th></th>
-                            <th>${isEditable ? `<input type="text" value="${batch1}" style="color:#ffffff; font-weight:700;" onchange="app.updateAllOverField(${trainerId}, '${monthKey}', 'batchName', this.value)">` : batch1}</th>
+                            <th class="allover-batch-th" onmouseenter="app.showBatchChartPopover(event, ${trainerId}, '${monthKey}', 'section4')" onmouseleave="app.hideBatchChartPopover(event)">
+                                <div class="allover-batch-wrapper">
+                                    ${isEditable ? `<input type="text" class="allover-batch-input" value="${batch4}" onchange="app.updateAllOverField(${trainerId}, '${monthKey}', 'batchName4', this.value)" onmouseenter="app.showBatchChartPopover(event, ${trainerId}, '${monthKey}', 'section4')">` : `<span class="allover-batch-text">${batch4}</span>`}
+                                    <button type="button" class="batch-chart-trigger-btn" onclick="app.toggleBatchChartPopover(event, ${trainerId}, '${monthKey}', 'section4')" title="View & Edit Performance Chart">
+                                        <i data-lucide="bar-chart-2" style="width: 13px; height: 13px;"></i>
+                                    </button>
+                                </div>
+                            </th>
                             <th></th>
                             <th></th>
                             <th></th>
@@ -6925,7 +7522,7 @@ var app = {
                             <td></td>
                             <td></td>
                             <td></td>
-                            <td style="text-align: center; font-weight: 700;">${val('ojtNPS', '13%')}</td>
+                            <td style="text-align: center; font-weight: 700;" id="allover-avg-ojtNPS">${val('ojtNPS', '13%')}</td>
                             <td style="text-align: center; font-weight: 700; color: var(--primary);">${cell('ojtTargetNPS', '40%')}</td>
                         </tr>
                         <tr>
@@ -6935,7 +7532,7 @@ var app = {
                             <td></td>
                             <td></td>
                             <td></td>
-                            <td style="text-align: center; font-weight: 700;">${val('ojtQ', 'Pass')}</td>
+                            <td style="text-align: center; font-weight: 700;" id="allover-avg-ojtQ">${val('ojtQ', 'Pass')}</td>
                             <td style="text-align: center; font-weight: 700; color: var(--primary);">${cell('ojtTargetQ', '85%')}</td>
                         </tr>
                     </tbody>
@@ -6992,7 +7589,7 @@ var app = {
                                     ${rowRatings.map((rating, aIdx) => `
                                         <td>
                                             ${isEditable
-                    ? `<input type="number" min="1" max="5" value="${rating}" onchange="app.updateEvaluationRating(${trainerId}, '${monthKey}', ${q.id}, ${aIdx}, this.value)">`
+                    ? `<input type="number" min="0" max="5" step="any" value="${rating}" onchange="app.updateEvaluationRating(${trainerId}, '${monthKey}', ${q.id}, ${aIdx}, this.value)">`
                     : `<span style="font-weight: 700;">${rating}</span>`
                 }
                                         </td>
@@ -7535,14 +8132,16 @@ var app = {
             const ao = monthData.allOverData || this.getDefaultAllOverData();
             const m = ao.metrics || {};
             const batch1 = ao.batchName || 'Horizon SME Batch 22';
+            const batch2 = ao.batchName2 || ao.batchName || 'Horizon SME Batch 22';
             const mentorBatch = ao.mentorBatchName || 'Horizon SME Batch 21';
+            const batch4 = ao.batchName4 || ao.batchName || 'Horizon SME Batch 22';
             const allOverRows = [
                 ['Overall Throughput', '', batch1, '', '', '', 'Average', ''],
                 ['%', '', m.overallThroughputPct || '77%', '', '', '', m.overallThroughputPct || '77%', ''],
                 ['Knowledge & Updates Trainer Awareness', '', m.knowledgePct || '95%', '', '', '', m.knowledgePct || '95%', ''],
                 ['Trainees\' and trainer satisfaction evaluation', '', m.satisfactionPct || '100%', '', '', '', m.satisfactionPct || '100%', ''],
                 ['Following and responding to roles, polices and tasks deadline without delay', '', m.policiesCompliance || 'No', '', '', '', m.policiesCompliance || 'No', ''],
-                ['Number of trainees who passed from 1st time', '', batch1, '', '', '', 'Total', 'Averager'],
+                ['Number of trainees who passed from 1st time', '', batch2, '', '', '', 'Total', 'Averager'],
                 ['HC', '', m.pass1stTimeHC || '17', '', '', '', m.pass1stTimeHC || '17', m.pass1stTimeAvg || '100%'],
                 ['Pass', '', m.pass1stTimePass || '17', '', '', '', m.pass1stTimePass || '17', ''],
                 ['Generating accurate reports Daily with matching the deadline at the end of each batch', '', m.accurateReports || 'yes', '', '', '', m.accurateReports || 'yes', ''],
@@ -7552,7 +8151,7 @@ var app = {
                 ['', 'RCS', m.authRCS || '74%', '', '', '', m.authRCS || '74%', m.authTargetRCS || '56%'],
                 ['EU', 'NPS', m.euNPS || '74%', '', '', '', m.euNPS || '74%', m.euTargetNPS || '66%'],
                 ['', 'RCS', m.euRCS || '56%', '', '', '', m.euRCS || '56%', m.euTargetRCS || '55%'],
-                ['OJT Quality and NPS', '', batch1, '', '', '', 'Average', 'Target'],
+                ['OJT Quality and NPS', '', batch4, '', '', '', 'Average', 'Target'],
                 ['NPS', '', m.ojtNPS || '13%', '', '', '', m.ojtNPS || '13%', m.ojtTargetNPS || '40%'],
                 ['Q', '', m.ojtQ || 'Pass', '', '', '', m.ojtQ || 'Pass', m.ojtTargetQ || '85%']
             ];
@@ -8117,12 +8716,12 @@ var app = {
 
         // Update centered profile in the manager header
         const profileCenter = document.getElementById('manager-profile-center');
-        if (profileCenter) {
+        if (profileCenter && this.currentUser) {
             profileCenter.innerHTML = `
                 <div class="manager-profile-badge" style="cursor: default;">
                     <img src="${this.getValidImg(this.currentUser.img, 'https://placehold.co/40x40?text=M')}" onerror="this.src='https://placehold.co/40x40?text=M'" alt="Manager Photo">
                     <div>
-                        <div class="manager-name">${this.currentUser.name}</div>
+                        <div class="manager-name">${this.currentUser.name || 'Manager'}</div>
                         <div class="manager-role-tag">Manager Dashboard (${catFormatted})</div>
                     </div>
                 </div>
@@ -8288,13 +8887,13 @@ var app = {
         // Helper to check if trainer belongs to leader's team
         const isTrainerInLeaderTeam = (trainer, lId) => {
             if (!trainer || !lId) return false;
-            const leaderObj = this.leaders.find(l => String(l.id) === String(lId));
+            const leaderObj = (this.leaders || []).find(l => l && String(l.id) === String(lId));
             if (!leaderObj) return String(trainer.leaderId) === String(lId);
             return this.isTrainerUnderLeader(trainer, leaderObj);
         };
 
         // All trainers strictly belonging to this category
-        const trainersInCategory = (this.trainers || []).filter(t => this.isTrainerInCategory(t, selectedCat));
+        const trainersInCategory = (this.trainers || []).filter(t => t && this.isTrainerInCategory(t, selectedCat));
 
         // 2. Render Trainer Filters (Top Bar)
         const trainerFilters = document.getElementById('manager-trainer-filters');
@@ -8303,16 +8902,16 @@ var app = {
         if (trainerFilters) {
             let filteredTrainers = trainersInCategory;
             if (filter.leaderId) {
-                filteredTrainers = trainersInCategory.filter(t => isTrainerInLeaderTeam(t, filter.leaderId));
+                filteredTrainers = trainersInCategory.filter(t => t && isTrainerInLeaderTeam(t, filter.leaderId));
             } else if (filter.accountId) {
                 filteredTrainers = trainersInCategory.filter(t => 
-                    String(t.accountId) === String(filter.accountId) || (t.secondaryAccountIds && t.secondaryAccountIds.map(String).includes(String(filter.accountId)))
+                    t && (String(t.accountId) === String(filter.accountId) || (t.secondaryAccountIds && t.secondaryAccountIds.map(String).includes(String(filter.accountId))))
                 );
             }
 
             const searchTerm = (filter.search || '').toLowerCase();
             const searchedTrainers = searchTerm
-                ? filteredTrainers.filter(t => t.name.toLowerCase().includes(searchTerm))
+                ? filteredTrainers.filter(t => t && (t.name || '').toLowerCase().includes(searchTerm))
                 : filteredTrainers;
 
             // Update Search Container
@@ -8412,15 +9011,15 @@ var app = {
         // 3. Aggregate Data STRICTLY within this category
         let targetTrainers = [];
         if (filter.trainerId) {
-            targetTrainers = trainersInCategory.filter(t => String(t.id) === String(filter.trainerId));
+            targetTrainers = trainersInCategory.filter(t => t && String(t.id) === String(filter.trainerId));
             if (targetTrainers.length === 0) {
-                targetTrainers = this.trainers.filter(t => String(t.id) === String(filter.trainerId));
+                targetTrainers = (this.trainers || []).filter(t => t && String(t.id) === String(filter.trainerId));
             }
         } else if (filter.leaderId) {
-            targetTrainers = trainersInCategory.filter(t => isTrainerInLeaderTeam(t, filter.leaderId));
+            targetTrainers = trainersInCategory.filter(t => t && isTrainerInLeaderTeam(t, filter.leaderId));
         } else if (filter.accountId) {
             targetTrainers = trainersInCategory.filter(t => 
-                String(t.accountId) === String(filter.accountId) || (t.secondaryAccountIds && t.secondaryAccountIds.map(String).includes(String(filter.accountId)))
+                t && (String(t.accountId) === String(filter.accountId) || (t.secondaryAccountIds && t.secondaryAccountIds.map(String).includes(String(filter.accountId))))
             );
         } else {
             // Strictly all trainers in this category ONLY!
@@ -8429,15 +9028,65 @@ var app = {
 
         if (!filter.trainerId && filter.search) {
             const term = filter.search.toLowerCase();
-            targetTrainers = targetTrainers.filter(t => t.name.toLowerCase().includes(term));
+            targetTrainers = targetTrainers.filter(t => t && (t.name || '').toLowerCase().includes(term));
         }
 
-        const allPitches = targetTrainers.flatMap(t => t.pitchResults || []);
+        const allPitches = targetTrainers.flatMap(t => (t && t.pitchResults) || []);
         const totalBatches = allPitches.length;
         const totalPass = allPitches.reduce((sum, p) => sum + (parseInt(p.pass) || 0), 0);
         const totalFail = allPitches.reduce((sum, p) => sum + (parseInt(p.fail) || 0), 0);
         const totalTrainees = allPitches.reduce((sum, p) => sum + (parseInt(p.total) || ((parseInt(p.pass) || 0) + (parseInt(p.fail) || 0))), 0);
         const avgPassRate = totalTrainees > 0 ? ((totalPass / totalTrainees) * 100).toFixed(1) : 0;
+
+        // Render or hide Selected Trainer Center Display
+        const selectedTrainerEl = document.getElementById('manager-selected-trainer-display');
+        if (selectedTrainerEl) {
+            const selectedTrainer = filter.trainerId 
+                ? ((this.trainers || []).find(t => t && String(t.id) === String(filter.trainerId)) || (targetTrainers.length > 0 ? targetTrainers[0] : null))
+                : null;
+            
+            if (selectedTrainer) {
+                const trainerStatus = this.getTrainerStatus(selectedTrainer, filter.accountId);
+                const statusDays = this.getTrainerStatusDays(selectedTrainer);
+                const isTrainerOnBatch = trainerStatus === 'On Batch';
+                const isLeave = ['Maternity', 'Sick', 'Holiday', 'Mission'].includes(trainerStatus);
+                
+                let pillClass = 'pill-inactive';
+                let dotClass = 'dot-inactive';
+                if (isTrainerOnBatch) {
+                    pillClass = 'pill-active';
+                    dotClass = 'dot-active';
+                } else if (isLeave) {
+                    pillClass = 'pill-leave';
+                    dotClass = 'dot-leave';
+                }
+
+                const accObj = this.accounts.find(a => String(a.id) === String(selectedTrainer.accountId));
+                const accName = accObj ? accObj.name : '';
+
+                selectedTrainerEl.style.display = 'flex';
+                selectedTrainerEl.innerHTML = `
+                    <div class="selected-trainer-center-card glass shadow-sm">
+                        <div class="selected-trainer-badge-row">
+                            <span class="selected-trainer-eyebrow">
+                                <i data-lucide="user-check" style="width: 13px; height: 13px;"></i> Selected Trainer
+                            </span>
+                            <span class="trainer-status-pill ${pillClass}">
+                                <span class="trainer-status-dot ${dotClass}"></span> ${trainerStatus} (${statusDays}d)
+                            </span>
+                            ${accName ? `<span class="selected-trainer-account-tag"><i data-lucide="building-2" style="width: 12px; height: 12px;"></i> ${accName}</span>` : ''}
+                        </div>
+                        <h2 class="selected-trainer-center-name">${selectedTrainer.name}</h2>
+                    </div>
+                `;
+                if (typeof lucide !== 'undefined') {
+                    lucide.createIcons({ root: selectedTrainerEl });
+                }
+            } else {
+                selectedTrainerEl.style.display = 'none';
+                selectedTrainerEl.innerHTML = '';
+            }
+        }
 
         // 3. Render Stats
         const statsGrid = document.getElementById('manager-stats-container');
@@ -8579,6 +9228,12 @@ var app = {
 
         // If no batches exist for this trainer/scope:
         if (allPitches.length === 0) {
+            if (typeof Chart !== 'undefined' && typeof Chart.getChart === 'function') {
+                const b = Chart.getChart('managerBarChart');
+                if (b) b.destroy();
+                const d = Chart.getChart('managerDoughnutChart');
+                if (d) d.destroy();
+            }
             if (this.managerCharts.bar) {
                 this.managerCharts.bar.destroy();
                 this.managerCharts.bar = null;
@@ -8634,13 +9289,13 @@ var app = {
         const passData = last10.map(p => Number(p.pass) || 0);
         const failData = last10.map(p => Number(p.fail) || 0);
 
-        if (this.managerCharts.bar) {
-            this.managerCharts.bar.destroy();
-            this.managerCharts.bar = null;
-        }
-
         const barCtx = document.getElementById('managerBarChart');
         if (barCtx && typeof Chart !== 'undefined') {
+            const existingBar = (typeof Chart.getChart === 'function' ? Chart.getChart(barCtx) : null) || this.managerCharts.bar;
+            if (existingBar) {
+                existingBar.destroy();
+                this.managerCharts.bar = null;
+            }
             this.managerCharts.bar = new Chart(barCtx.getContext('2d'), {
                 type: 'bar',
                 data: {
@@ -8696,13 +9351,13 @@ var app = {
         const totalPass = allPitches.reduce((sum, p) => sum + (parseInt(p.pass) || 0), 0);
         const totalFail = allPitches.reduce((sum, p) => sum + (parseInt(p.fail) || 0), 0);
 
-        if (this.managerCharts.doughnut) {
-            this.managerCharts.doughnut.destroy();
-            this.managerCharts.doughnut = null;
-        }
-
         const doughCtx = document.getElementById('managerDoughnutChart');
         if (doughCtx && typeof Chart !== 'undefined') {
+            const existingDough = (typeof Chart.getChart === 'function' ? Chart.getChart(doughCtx) : null) || this.managerCharts.doughnut;
+            if (existingDough) {
+                existingDough.destroy();
+                this.managerCharts.doughnut = null;
+            }
             this.managerCharts.doughnut = new Chart(doughCtx.getContext('2d'), {
                 type: 'doughnut',
                 data: {

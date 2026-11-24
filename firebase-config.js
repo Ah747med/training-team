@@ -1,14 +1,14 @@
 // Firebase Configuration & Realtime Synchronization Helper
 (function () {
     const firebaseConfig = {
-        apiKey: "AIzaSyBU42hEaH3P4JtPrtFRcQWp7OJGVThhDBk",
-        authDomain: "trainingsystem-40654.firebaseapp.com",
-        databaseURL: "https://trainingsystem-40654-default-rtdb.firebaseio.com",
-        projectId: "trainingsystem-40654",
-        storageBucket: "trainingsystem-40654.firebasestorage.app",
-        messagingSenderId: "585482109860",
-        appId: "1:585482109860:web:84c1919b151957792fb731",
-        measurementId: "G-NBT98MXM8C"
+        apiKey: "AIzaSyDsAi7LUXRXgkQn6ZHvNjRFv2vEZ0JJd3s",
+        authDomain: "cars-system-14762.firebaseapp.com",
+        databaseURL: "https://cars-system-14762-default-rtdb.firebaseio.com",
+        projectId: "cars-system-14762",
+        storageBucket: "cars-system-14762.firebasestorage.app",
+        messagingSenderId: "559208143453",
+        appId: "1:559208143453:web:70e81c7af902cee921cbb4",
+        measurementId: "G-PNPL952C14"
     };
 
     let fbApp = null;
@@ -91,7 +91,7 @@
                     lastUpdated: Date.now()
                 };
 
-                await fbDB.ref('systemData').update(payload);
+                await fbDB.ref('systemData').set(payload);
             } catch (err) {
                 console.error("Error syncing systemData to Firebase:", err);
             }
@@ -100,6 +100,16 @@
         // Initialize Realtime Listeners
         initRealtimeSync(appInstance) {
             if (!this.isAvailable()) return;
+
+            let refreshTimeout = null;
+            const debouncedRefresh = () => {
+                if (refreshTimeout) clearTimeout(refreshTimeout);
+                refreshTimeout = setTimeout(() => {
+                    if (typeof appInstance.refreshCurrentView === 'function') {
+                        appInstance.refreshCurrentView();
+                    }
+                }, 80);
+            };
 
             const systemRef = fbDB.ref('systemData');
 
@@ -118,7 +128,8 @@
                     let hasChanges = false;
 
                     if (cloudData.trainers) {
-                        appInstance.trainers = Array.isArray(cloudData.trainers) ? cloudData.trainers : Object.values(cloudData.trainers);
+                        const rawTrainers = Array.isArray(cloudData.trainers) ? cloudData.trainers : Object.values(cloudData.trainers);
+                        appInstance.trainers = rawTrainers.filter(t => t && typeof t === 'object' && t.name);
                         if (typeof appInstance.cleanupSystemBatches === 'function') {
                             appInstance.cleanupSystemBatches();
                         } else if (typeof appInstance.ensureTrainerBatches === 'function') {
@@ -128,32 +139,38 @@
                         hasChanges = true;
                     }
                     if (cloudData.accounts) {
-                        appInstance.accounts = Array.isArray(cloudData.accounts) ? cloudData.accounts : Object.values(cloudData.accounts);
+                        const rawAccounts = Array.isArray(cloudData.accounts) ? cloudData.accounts : Object.values(cloudData.accounts);
+                        appInstance.accounts = rawAccounts.filter(a => a && typeof a === 'object' && a.name);
                         localStorage.setItem('accounts', JSON.stringify(appInstance.accounts));
                         hasChanges = true;
                     }
                     if (cloudData.leaders) {
-                        appInstance.leaders = Array.isArray(cloudData.leaders) ? cloudData.leaders : Object.values(cloudData.leaders);
+                        const rawLeaders = Array.isArray(cloudData.leaders) ? cloudData.leaders : Object.values(cloudData.leaders);
+                        appInstance.leaders = rawLeaders.filter(l => l && typeof l === 'object' && l.name);
                         localStorage.setItem('leaders', JSON.stringify(appInstance.leaders));
                         hasChanges = true;
                     }
                     if (cloudData.managers) {
-                        appInstance.managers = Array.isArray(cloudData.managers) ? cloudData.managers : Object.values(cloudData.managers);
+                        const rawManagers = Array.isArray(cloudData.managers) ? cloudData.managers : Object.values(cloudData.managers);
+                        appInstance.managers = rawManagers.filter(m => m && typeof m === 'object');
                         localStorage.setItem('managers', JSON.stringify(appInstance.managers));
                         hasChanges = true;
                     }
                     if (cloudData.videos) {
-                        appInstance.videos = Array.isArray(cloudData.videos) ? cloudData.videos : Object.values(cloudData.videos);
+                        const rawVideos = Array.isArray(cloudData.videos) ? cloudData.videos : Object.values(cloudData.videos);
+                        appInstance.videos = rawVideos.filter(v => v && typeof v === 'object');
                         localStorage.setItem('videos', JSON.stringify(appInstance.videos));
                         hasChanges = true;
                     }
                     if (cloudData.exams) {
-                        appInstance.exams = Array.isArray(cloudData.exams) ? cloudData.exams : Object.values(cloudData.exams);
+                        const rawExams = Array.isArray(cloudData.exams) ? cloudData.exams : Object.values(cloudData.exams);
+                        appInstance.exams = rawExams.filter(e => e && typeof e === 'object');
                         localStorage.setItem('exams', JSON.stringify(appInstance.exams));
                         hasChanges = true;
                     }
                     if (cloudData.materials) {
-                        appInstance.materials = Array.isArray(cloudData.materials) ? cloudData.materials : Object.values(cloudData.materials);
+                        const rawMaterials = Array.isArray(cloudData.materials) ? cloudData.materials : Object.values(cloudData.materials);
+                        appInstance.materials = rawMaterials.filter(m => m && typeof m === 'object');
                         localStorage.setItem('materials', JSON.stringify(appInstance.materials));
                         hasChanges = true;
                     }
@@ -162,9 +179,9 @@
                         localStorage.setItem('adminCreds', JSON.stringify(appInstance.adminCreds));
                     }
 
-                    // Refresh current UI if active
-                    if (hasChanges && typeof appInstance.refreshCurrentView === 'function') {
-                        appInstance.refreshCurrentView();
+                    // Refresh current UI if active (debounced to avoid multiple rapid rerenders)
+                    if (hasChanges) {
+                        debouncedRefresh();
                     }
                 } catch (e) {
                     console.error("Error processing cloud update:", e);
@@ -181,9 +198,7 @@
                     for (const safeKey of Object.keys(val)) {
                         localStorage.setItem(safeKey, JSON.stringify(val[safeKey]));
                     }
-                    if (typeof appInstance.refreshCurrentView === 'function') {
-                        appInstance.refreshCurrentView();
-                    }
+                    debouncedRefresh();
                 }
             });
         }
